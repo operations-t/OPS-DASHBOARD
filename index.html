@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Operations Dashboard · Shwapno</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>">
+<link rel="stylesheet" href="assets/styles.css">
+<script>try{var t=localStorage.getItem('opsdash-theme');if(t)document.documentElement.dataset.theme=t;}catch(e){}</script>
+</head>
+<body>
+<div class="shell">
+  <aside class="rail" id="rail" aria-label="Navigation and filters">
+    <div class="brand"><span class="brand-mark">S</span><div><strong>Operations</strong><small>Shwapno retail</small></div></div>
+    <nav class="nav" id="nav"></nav>
+    <section class="filters" id="filters" aria-label="Filters"></section>
+    <footer class="rail-foot" id="railFoot"></footer>
+  </aside>
+  <div class="scrim" id="scrim" hidden></div>
+  <main class="main">
+    <header class="topbar">
+      <button class="btn icon menu-btn" id="menuBtn" aria-label="Open menu">☰</button>
+      <div class="title-block"><h1 id="pageTitle">Overview</h1><p class="scope" id="scope"></p></div>
+      <div class="top-tools">
+        <div class="seg" id="periodSeg" role="group" aria-label="Sales period"></div>
+        <span class="fresh" id="fresh"></span>
+        <button class="btn" id="resetBtn">Clear filters</button>
+        <button class="btn icon" id="themeBtn" aria-label="Switch theme">◐</button>
+      </div>
+    </header>
+    <div class="pills" id="pills"></div>
+    <div class="view" id="view"><p class="empty">Loading data…</p></div>
+  </main>
+</div>
+<aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-labelledby="drawerTitle" hidden>
+  <header class="drawer-head"><h2 id="drawerTitle"></h2><button class="btn" id="drawerClose">Close</button></header>
+  <div class="drawer-body" id="drawerBody"></div>
+</aside>
+<script src="assets/app.js"></script>
+</body>
+</html>

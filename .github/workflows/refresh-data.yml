@@ -1,0 +1,36 @@
+name: Refresh data
+
+on:
+  schedule:
+    - cron: "0 2-17 * * *"   # every hour, 8 am to 11 pm Dhaka time (UTC+6)
+  workflow_dispatch:          # "Run workflow" button for an instant refresh
+
+permissions:
+  contents: write
+
+concurrency:
+  group: refresh-data
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: scripts/requirements.txt
+      - run: pip install -r scripts/requirements.txt
+      - name: Download Drive files and build data.json
+        run: python scripts/build_data.py
+      - name: Publish if the data changed
+        run: |
+          if git diff --quiet -- data/data.json; then echo "No data changes."; exit 0; fi
+          git config user.name "ops-dashboard-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/data.json
+          git commit -m "Refresh data $(date -u +'%Y-%m-%d %H:%M') UTC"
+          git push
