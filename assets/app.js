@@ -7,9 +7,10 @@
 
   // ------------------------------------------------------------------ config
   const NAV = [
+    { group: "", items: [["gm", "Growth & momentum"]] },
     { group: "Sales", items: [["overview", "Overview"], ["achievement", "Sales achievement"], ["growth", "Sales growth"], ["footfall", "Footfall and basket"], ["ranking", "Growth and degrowth"], ["loss", "Loss-making outlets"], ["category", "Category performance"]] },
     { group: "Performance", items: [["performance", "KPI performance"]] },
-    { group: "Connected dashboards", items: [["av", "Availability"], ["cw", "Consumable and wastage"], ["gm", "Growth & momentum"], ["gpva", "GPVA% Tracker"], ["cc", "Credit Card Extra Amount"], ["vc", "Visit Compliance"]] },
+    { group: "Connected dashboards", items: [["av", "Availability"], ["cw", "Consumable and wastage"], ["gpva", "GPVA% Tracker"], ["cc", "Credit Card Extra Amount"], ["vc", "Visit Compliance"]] },
     { group: "System", items: [["dq", "Data quality"]] },
   ];
   const TITLES = Object.fromEntries(NAV.flatMap((g) => g.items.map(([k, t]) => [k, t])));
@@ -213,7 +214,7 @@
 
   // ------------------------------------------------------------------ shell
   function renderNav() {
-    $("#nav").innerHTML = NAV.map((g) => `<div class="nav-group">${esc(g.group)}</div>` + g.items.map(([k, t, soon]) =>
+    $("#nav").innerHTML = NAV.map((g) => (g.group ? `<div class="nav-group">${esc(g.group)}</div>` : "") + g.items.map(([k, t, soon]) =>
       `<button data-page="${k}" ${S.page === k ? 'aria-current="page"' : ""}>${esc(t)}${soon ? '<span class="soon">Phase 2</span>' : ""}</button>`).join("")).join("");
     $$("#nav [data-page]").forEach((b) => b.addEventListener("click", () => { location.hash = b.dataset.page; closeRail(); }));
   }
@@ -351,7 +352,7 @@
       rows: levelRows(list, "rl"), cols: achCols(r, "rl"), key: (x) => x.key, searchText: (x) => x.name, defaultSort: "ach", pageSize: 25,
     });
     return `
-      <div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
+      <div class="kpis ov-kpis">
         ${heroAchievement(a, r)}
         ${kpi({ label: "Sales growth vs last year", value: delta(a.gy), sub: "All stores", foot: `<span>${bdt(a.s)}</span><span>last year ${bdt(a.sy)}</span>`, accent: "var(--series-2)" })}
         ${kpi({ label: "Same-store growth vs last year", value: delta(a.gss), sub: `${int(a.ssn)} same stores`, foot: `<span>${bdt(a.ssS)}</span><span>last year ${bdt(a.ssY)}</span>`, accent: "var(--series-2)" })}
@@ -360,12 +361,12 @@
         ${kpi({ label: "Average bill value", value: bdt(a.bk), sub: delta(growth(a.bk, a.bky)) + " vs last year", foot: `<span>last year ${bdt(a.bky)}</span>`, accent: "var(--series-1)" })}
         ${kpi({ label: "Gross profit margin", value: pct(a.gp), sub: delta(isNum(a.gp) && isNum(a.gpy) ? a.gp - a.gpy : null, "pp") + " vs last year", foot: `<span>GP ${bdt(a.gv)}</span>`, accent: "var(--series-3)" })}
       </div>
-      <div class="grid-2">${league}${bandsPanel(list)}</div>
+      ${league}
       <div class="grid-h">${mini("Top 10 outlets", best)}${mini("Bottom 10 outlets", worst)}</div>
-      ${catRows.length ? `<section class="panel"><div class="panel-head"><div><h2>Category growth</h2><p>Company-wide figures from the report. Filters don't apply here.</p></div></div>
+      <div class="grid-2">${catRows.length ? `<section class="panel"><div class="panel-head"><div><h2>Category growth</h2><p>Company-wide figures from the report. Filters don't apply here.</p></div></div>
         <div class="table-wrap"><table><thead><tr><th>Category</th><th class="num">All stores vs last year</th><th class="num">Own same-store vs last year</th><th class="num">Franchise same-store vs last year</th><th class="num">All stores vs last month</th></tr></thead><tbody>
         ${catRows.map((c) => `<tr><td class="cell-primary">${esc(c.cat)}</td><td class="num">${delta(c.all)}</td><td class="num">${delta(c.own)}</td><td class="num">${delta(c.fran)}</td><td class="num">${delta(c.m?.all)}</td></tr>`).join("")}
-        </tbody></table></div></section>` : ""}`;
+        </tbody></table></div></section>` : ""}${bandsPanel(list)}</div>`;
   }
 
   function pageAchievement() {
