@@ -37,7 +37,7 @@
   ];
 
   const S = { data: null, page: "overview", period: "tilldate", filters: {}, openDim: null, tables: {}, level: "rl", bands: new Set(), lastFocus: null,
-    cmp: "y", scope: "all", trend: "all", kp: null, kl: "rho", kv: "rank", pm: null, pbasis: "after", pstat: "all", plevel: "rl", ageDrill: null,
+    cmp: "y", scope: "all", trend: "all", kp: null, kl: "rho", kv: "rank", pm: null, pbasis: "before", pstat: "all", plevel: "rl", ageDrill: null,
     net: null, netLoading: false, netErr: null, netMode: "through", netFrom: "", netTo: "",
     on: { league: "regionalHead", oversight: "regional", launch: "year", cols: "key", drill: null },
     gm: { quad: "regionalHead", mover: "regionalHead", dir: "gain", league: "regionalHead" } };
@@ -834,7 +834,7 @@
     const basisLbl = S.pbasis === "after" ? "after financing cost" : "before financing cost";
     const periodName = ytd ? `year to date (${P.months.length} months)` : fmonth(S.pm);
     const monthSel = `<select class="sel" data-sel="pm" aria-label="Month">${P.months.map((m) => `<option value="${m}" ${m === S.pm ? "selected" : ""}>${fmonth(m)}</option>`).join("")}${P.months.length > 1 ? `<option value="ytd" ${ytd ? "selected" : ""}>Year to date, ${fmonth(P.months[0])} to ${fmonth(P.months[P.months.length - 1])}</option>` : ""}</select>`;
-    const basisSeg = seg("pbasis", [["after", "After financing cost"], ["before", "Before financing cost"]], "P&L basis");
+    const basisSeg = seg("pbasis", [["before", "Before financing cost"], ["after", "After financing cost"]], "P&L basis");
 
     // age bands
     const bands = [...AGE_BANDS.map((b) => b[0]), "Opening date unknown"].map((b) => {
