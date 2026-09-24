@@ -166,3 +166,5 @@
 .stat-strip.net-strip>div{display:flex;align-items:center;gap:4px 10px;flex-wrap:wrap}
 .stat-strip.net-strip>div>span{display:inline-flex;align-items:center;gap:6px}
 .stat-strip.net-strip strong{display:inline;font-size:17px}
+tr[data-lpick]{cursor:pointer}
+tr[data-lpick][aria-selected="true"] td{background:var(--info-soft)}

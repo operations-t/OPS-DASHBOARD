@@ -490,6 +490,17 @@
     $$("[data-set]", root).forEach((b) => (b.onclick = () => { S[b.dataset.set] = b.dataset.val; changed(); }));
     $$("[data-sel]", root).forEach((sel) => (sel.onchange = () => { S[sel.dataset.sel] = sel.value; changed(); }));
     $$("[data-go]", root).forEach((b) => (b.onclick = () => (location.hash = b.dataset.go)));
+    $$("[data-lpick]", root).forEach((tr) => {
+      const go = () => {
+        const same = S.lossPick?.level === S.plevel && S.lossPick.key === tr.dataset.lpick;
+        S.lossPick = same ? null : { level: S.plevel, key: tr.dataset.lpick };
+        if (S.tables.loss) S.tables.loss.page = 1;
+        render();
+        if (!same) requestAnimationFrame(() => $("#t-loss")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+      };
+      tr.onclick = go; tr.onkeydown = (e) => { if (e.key === "Enter") go(); };
+    });
+    $$("[data-lpick-clear]", root).forEach((b) => (b.onclick = () => { S.lossPick = null; render(); }));
     wireNet(root);
   }
 
@@ -835,14 +846,17 @@
       ${bands.map((x) => `<tr><td class="cell-primary">${esc(x.b)}</td><td class="num">${ageDrillLink(x.b, "all", int(x.n), "View all trading outlets")}</td><td class="num">${ageDrillLink(x.b, "loss", int(x.l), "View loss-making outlets")}</td><td class="num">${ageDrillLink(x.b, "loss", pct(x.l / x.n), "View outlets behind the loss-making share")}</td><td class="num down">${ageDrillLink(x.b, "loss", bdt(x.loss), "View outlets contributing to total loss", "down")}</td></tr>`).join("")}
       </tbody></table></div></section>`;
 
-    // by level
+    // by level; a picked row narrows the outlet list below to that group
     const lvls = LEVELS.filter((l) => l[0] !== "outlet");
+    const lvlName = lvls.find((l) => l[0] === S.plevel)[1];
+    const pick = S.lossPick && S.lossPick.level === S.plevel ? S.lossPick.key : null;
     const g = new Map();
     all.forEach((x) => { const k = x.o.dim[S.plevel]; if (!g.has(k)) g.set(k, []); g.get(k).push(x); });
     const grpRows = [...g.entries()].map(([k, xs]) => { const l = xs.filter((x) => x.loss); return { key: k, name: k, sub: `${int(xs.length)} outlets`, n: xs.length, l: l.length, share: l.length / xs.length, loss: sum(l, "pl"), net: sum(xs, "pl"), s: xs.reduce((t, x) => t + (x.o.s || 0), 0) }; });
     const grp = mountTable("loss-grp", {
       title: `Loss by ${lvls.find((l) => l[0] === S.plevel)[1].toLowerCase()}`, file: `loss_by_${S.plevel}_${S.pm}`, pageSize: 25,
-      desc: (n) => `${int(n)} rows, P&L ${basisLbl}.`, rows: grpRows, key: (x) => x.key, searchText: (x) => x.name, defaultSort: "loss", defaultDir: "asc",
+      desc: (n) => `${int(n)} rows, P&L ${basisLbl}. Click a row to list its loss-making outlets below.`, rows: grpRows, key: (x) => x.key, searchText: (x) => x.name, defaultSort: "loss", defaultDir: "asc",
+      rowAttr: (x) => `data-lpick="${esc(x.key)}" tabindex="0" title="List ${esc(x.name)}'s loss-making outlets"${pick === x.key ? ' aria-selected="true"' : ""}`,
       tools: `<select class="sel" data-sel="plevel" aria-label="Group by">${lvls.map(([k, t]) => `<option value="${k}" ${S.plevel === k ? "selected" : ""}>${esc(t)}</option>`).join("")}</select>`,
       cols: [{ k: "name", label: lvls.find((l) => l[0] === S.plevel)[1], fmt: (x) => `<span class="cell-primary">${esc(x.name)}</span><span class="cell-secondary">${esc(x.sub)}</span>`, csv: (x) => x.name, val: (x) => x.name },
         { k: "l", label: "Loss-making", num: 1, fmt: (x) => int(x.l) }, { k: "share", label: "Share", num: 1, fmt: (x) => pct(x.share), csv: (x) => pcsv(x.share) },
@@ -854,8 +868,10 @@
     // outlet list
     let rows = losses.map((x) => ({ key: x.o.c, name: x.o.nm, sub: `${x.o.c}, ${x.o.dim.rl}, ${x.o.dim.zn}`, ...x, s: x.o.s }));
     if (S.pstat !== "all" && !ytd) rows = rows.filter((x) => x.st === S.pstat);
+    if (pick !== null) rows = rows.filter((x) => x.o.dim[S.plevel] === pick);
     const list = mountTable("loss", {
-      title: `Loss-making outlets, ${periodName}`, file: `loss_making_outlets_${S.pm}`,
+      title: `Loss-making outlets, ${periodName}`, file: `loss_making_outlets_${S.pm}${pick !== null ? "_" + String(pick).toLowerCase().replace(/[^a-z0-9]+/g, "_") : ""}`,
+      banner: pick !== null ? `<div class="drill-banner">Showing <strong>${esc(lvlName)}: ${esc(pick)}</strong> within the sidebar filters. <button type="button" data-lpick-clear>Show all outlets</button></div>` : "",
       desc: (n) => `${int(n)} outlets. "Break-even sales" is the sales needed to cover costs at the outlet's current margin. Click a row for the cost breakdown.`,
       rows, key: (x) => x.key, searchText: (x) => `${x.name} ${x.sub}`, defaultSort: "pl", defaultDir: "asc", rowAttr: (x) => `data-pnl="${esc(x.key)}" tabindex="0"`,
       tools: ytd ? "" : seg("pstat", [["all", "All"], ["new", "New loss"], ["wide", "Widening"], ["narrow", "Narrowing"]], "Loss status"),
@@ -2075,7 +2091,7 @@
     try { localStorage.setItem("opsdash-theme", t); } catch (e) {}
     if (NET_PAGES.has(S.page)) render(); // charts resolve colour tokens when drawn
   });
-  $("#resetBtn").addEventListener("click", () => { DIMS.concat(NET_DIMS).forEach(([k]) => S.filters[k].clear()); S.bands.clear(); S.on.drill = null; changed(); });
+  $("#resetBtn").addEventListener("click", () => { DIMS.concat(NET_DIMS).forEach(([k]) => S.filters[k].clear()); S.bands.clear(); S.on.drill = null; S.lossPick = null; changed(); });
   applyRail();
   $("#railBtn").addEventListener("click", () => { UI.railHidden = !UI.railHidden; saveUI(); applyRail(); });
   $("#menuBtn").addEventListener("click", () => { $("#rail").classList.add("open"); $("#scrim").hidden = false; });
