@@ -2558,7 +2558,7 @@
 
   // ---- data quality (shown on the Data quality page)
   function cwQualityPanel() {
-    const head = `<div class="panel-head"><div><h2>Consumable and wastage files</h2><p>From the Consumable & Wastage Control Drive folder. Files are picked by name: Target*.txt, Sales-Till*.xlsx, Zone Distribution*.xlsx, CONSUMABLE*, WASTAGE*.</p></div></div>`;
+    const head = `<div class="panel-head"><div><h2>Consumable and wastage files</h2><p>Consumable, wastage, sales and targets come from the Consumable & Wastage Control Drive folder; Zone Distribution from the Performance folder. Each file is recognised by its columns, so filenames don't matter.</p></div></div>`;
     if (!S.cw) { loadCw(); return `<section class="panel">${head}<div class="panel-body"><p class="muted" style="margin:0">${S.cwErr ? `cw.json could not be loaded (${esc(S.cwErr)}).` : "Loading…"}</p></div></section>`; }
     const q = S.cw.dataQuality, w = q.consumableWindow || {}, un = q.unmappedActiveOutlets || [], rc = q.sales?.reconciliation || {}, al = q.periodAlignment || {};
     const rev = [...new Set([...(q.negativeNetConsumableOutlets || []), ...(q.negativeNetWastageOutlets || [])])], dup = q.zone?.duplicateCodes || [];
@@ -2569,7 +2569,12 @@
         ${item(un.length ? "warn" : "good", un.length ? "Active outlets missing from the zone master" : "All active outlets are mapped", un.length ? `${esc(un.join(", "))}. They show as Unmapped and are left out of target-weighted results only.` : "Every active outlet joined to the hierarchy master.")}
         ${item(rev.length ? "info" : "good", rev.length ? "Net movement reversals" : "No net reversal outlets", rev.length ? `${esc(rev.join(", "))}. Kept as net movement and flagged rather than zeroed.` : "Net movement values are non-negative for all outlets.")}
         ${item(dup.length ? "bad" : "good", dup.length ? "Duplicate outlet codes in the zone master" : "Zone master codes are unique", dup.length ? esc(dup.join(", ")) : `${int(q.zone?.rows)} outlets, no duplicated code.`)}
-        ${item(al.aligned ? "good" : "warn", al.aligned ? "Source periods line up" : "Source periods do not line up", al.aligned ? "Sales, consumable and wastage cover the same days." : `${esc((al.laggingSources || []).join(", ") || "A source")} ends before sales. Consumable corrects for this through its posting window; the two wastage rates are understated. Filter to ${fdate(al.commonStart)} to ${fdate(al.commonEnd)} for a like-for-like view.`)}
+        ${(() => {
+          if (al.aligned) return item("good", "Source periods line up", "Sales, consumable and wastage cover the same days.");
+          const src = al.sources || {}, sEnd = src.sales?.dateMax, mEnd = [src.consumable?.dateMax, src.wastage?.dateMax].filter(Boolean).sort().pop();
+          if (sEnd && mEnd && sEnd < mEnd) return item("warn", "Sales stops before the consumable and wastage postings", `Sales runs to ${fdate(sEnd)} but postings run to ${fdate(mEnd)}. Rates need sales as their base, so the dashboard shows up to ${fdate(sEnd)}; postings after that appear once a newer Sales-Till file is in the Drive folder.`);
+          return item("warn", "Source periods do not line up", `${esc((al.laggingSources || []).join(", ") || "A source")} ends before sales. Consumable corrects for this through its posting window; the two wastage rates are understated. Filter to ${fdate(al.commonStart)} to ${fdate(al.commonEnd)} for a like-for-like view.`);
+        })()}
         ${item((w.outletsWithoutPosting || []).length ? "info" : "good", "Consumable base counted to each outlet's last posting date", `${int(w.outletsTruncated)} of ${int(w.outletsWithPosting)} posting outlets stop before ${fdate(w.salesLastDate)}, holding back ${esc(exact(w.excludedSales))} of ${esc(exact(w.salesTotal))} sales. The full-period rate reads ${cwPct(w.rateOnPostedWindow)} instead of ${cwPct(w.rateOnFullSales)}.`)}
         ${rc.reportedTotal != null ? item(rc.matches ? "good" : "info", rc.matches ? "Sales reconciles to the file's total row" : "Sales detail differs from the file's total row", `Detail rows ${esc(exact(rc.detailTotal))} against total row ${esc(exact(rc.reportedTotal))}.`) : ""}
       </div></section>`;

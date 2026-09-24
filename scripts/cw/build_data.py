@@ -38,6 +38,9 @@ def parse_date(value: Any) -> dt.date | None:
     if isinstance(value, dt.date):
         return value
     text = clean_text(value)
+    # Excel date cells arrive as "2026-09-01 00:00:00" once cleaned to text.
+    if re.match(r"^\d{4}-\d{2}-\d{2}[ T]\d", text):
+        text = text[:10]
     for pattern in ("%d-%m-%Y", "%d.%m.%Y", "%Y-%m-%d", "%d/%m/%Y"):
         try:
             return dt.datetime.strptime(text, pattern).date()
@@ -989,8 +992,9 @@ def validate_payload(payload: dict[str, Any]) -> None:
             )
 
 
-def build_dashboard_data(input_dir: Path) -> dict[str, Any]:
-    files = resolve_source_files(input_dir)
+def build_dashboard_data(input_dir: Path, files: dict[str, Path] | None = None) -> dict[str, Any]:
+    # refresh.py passes files it has already recognised by their structure.
+    files = files or resolve_source_files(input_dir)
 
     target_map, target_rows = read_targets(files["targets"])
     zone_map, zone_quality = read_zone_distribution(files["zones"], target_map)
