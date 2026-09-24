@@ -1433,7 +1433,7 @@
       ${kpi({ label: `${esc(lm)} sales`, value: bdt(b.lastTotal || null), sub: `${int(b.withBase.length)} of ${int(list.length)} outlets have a baseline`, foot: "<span>Full-month actual</span>", accent: "var(--series-3)" })}
       ${kpi({ label: "Daily run rate", value: bdt(runRate), sub: neededRate === null ? "Month complete" : `${bdt(neededRate)} a day needed to hit target`, foot: `<span>${int(observed.length)} trading days observed · ${int(remaining)} left</span>`, accent: "var(--series-4)" })}
       </div></div>
-      <div class="stat-strip" style="border-top:1px solid var(--line-soft)">${[["Growing", growing, "good", "MoM above +2%", shareOf(growing)], ["Flat", flat, "warn", "MoM within ±2%", shareOf(flat)],
+      <div class="stat-strip net-strip" style="border-top:1px solid var(--line-soft)">${[["Growing", growing, "good", "MoM above +2%", shareOf(growing)], ["Flat", flat, "warn", "MoM within ±2%", shareOf(flat)],
         ["Declining", declining, "bad", "MoM below −2%", shareOf(declining)], ["No baseline", list.length - b.withBase.length, "idle", `Not in ${lm} file`, "Left out of growth"]]
         .map(([l, n, k, rule, note]) => `<div><span><span class="chip ${k}">${esc(l)}</span> <span class="muted" style="font-weight:500">${esc(rule)}</span></span><strong>${int(n)}</strong><small>${esc(note)}</small></div>`).join("")}</div></section>`;
 

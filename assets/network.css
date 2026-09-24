@@ -31,7 +31,7 @@
 .meter-scale{display:flex;justify-content:space-between;margin-top:4px;font-size:10.5px;color:var(--ink-3)}
 /* stack the figure and its rows when the card itself is narrow */
 .net-hero{container-type:inline-size}
-@container (max-width:460px){.kpi.hero .hero-grid{grid-template-columns:1fr;gap:10px}.hero-rows{border-left:0;padding-left:0;padding-top:10px;border-top:1px solid var(--line)}}
+@container (max-width:380px){.kpi.hero .hero-grid{grid-template-columns:1fr;gap:10px}.hero-rows{border-left:0;padding-left:0;padding-top:10px;border-top:1px solid var(--line)}}
 
 /* glance strip */
 .stat-strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(140px,100%),1fr))}
@@ -135,3 +135,34 @@
 .filters-note{margin:0;font-size:12px;color:var(--ink-3)}
 @media (min-width:1081px){.shell.rail-hidden .rail{display:none}}
 @media (max-width:1080px){.rail-btn{display:none}}
+
+/* compact KPI rows on the network pages (about 40% shorter) */
+.net-kpis{gap:10px}
+.net-kpis .kpi{padding:10px 14px;gap:3px}
+.net-kpis .kpi .label{font-size:11.5px}
+.net-kpis .kpi .sub{font-size:11.5px}
+.net-kpis .kpi .foot{padding-top:5px;font-size:11px}
+.net-kpis .kpi.hero .hero-figure{gap:3px}
+.net-kpis .kpi.hero .hero-figure .value{font-size:clamp(24px,2vw,32px)}
+.net-kpis .kpi.hero .hero-grid{gap:14px}
+.net-kpis .hero-rows{gap:3px}
+.net-kpis .hero-row dt{font-size:11.5px}.net-kpis .hero-row dd{font-size:13px}
+.net-kpis .meter{height:6px;margin-top:4px}
+.net-kpis .meter-scale{margin-top:2px;font-size:10px}
+.net-kpis+.panel-body,.panel-body:has(>.net-kpis){padding-top:12px;padding-bottom:12px}
+.stat-strip.net-strip>div{padding:8px 18px}
+.stat-strip.net-strip strong{font-size:18px;margin-top:0}
+.net-kpis .kpi{padding:8px 12px;gap:2px}
+.net-kpis .kpi:not(.hero) .value{font-size:clamp(18px,1.5vw,24px)}
+.net-kpis .kpi.hero .hero-figure .value{font-size:clamp(22px,1.8vw,28px)}
+.net-kpis .kpi .foot{margin-top:auto;padding-top:3px;border-top:0;line-height:1.3}
+.net-kpis .meter-scale{display:none}
+.net-kpis .meter{margin-top:6px}
+.panel:has(.net-kpis)>.panel-head{padding-top:10px;padding-bottom:10px}
+.panel-body:has(>.net-kpis){padding-top:10px;padding-bottom:10px}
+.stat-strip.net-strip>div{padding:6px 18px}
+.stat-strip.net-strip strong{font-size:16px;line-height:1.25}
+.stat-strip.net-strip small{line-height:1.3}
+.stat-strip.net-strip>div{display:flex;align-items:center;gap:4px 10px;flex-wrap:wrap}
+.stat-strip.net-strip>div>span{display:inline-flex;align-items:center;gap:6px}
+.stat-strip.net-strip strong{display:inline;font-size:17px}
