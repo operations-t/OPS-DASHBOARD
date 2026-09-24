@@ -39,6 +39,7 @@
   const S = { data: null, page: "overview", period: "tilldate", filters: {}, openDim: null, tables: {}, level: "rl", bands: new Set(), lastFocus: null,
     cmp: "y", scope: "all", trend: "all", kp: null, kl: "rho", kv: "rank", pm: null, pbasis: "before", pstat: "all", plevel: "rl", ageDrill: null,
     net: null, netLoading: false, netErr: null, netMode: "through", netFrom: "", netTo: "",
+    gdrill: {},
     on: { league: "regionalHead", oversight: "regional", launch: "year", cols: "key", drill: null },
     gm: { quad: "regionalHead", mover: "regionalHead", dir: "gain", league: "regionalHead" } };
   DIMS.concat(NET_DIMS).forEach(([k]) => (S.filters[k] = new Set()));
@@ -371,6 +372,12 @@
     return cols;
   }
   const outletAttr = (x) => (x.o ? `data-outlet="${esc(x.o.c)}" tabindex="0"` : "");
+  // Group drill: clicking a regional leader, zonal or other group row lists that group's outlets.
+  // S.gdrill[tableId] = { level, key }; it only applies while the table is still grouped by that level.
+  const levelName = (level) => (LEVELS.find((l) => l[0] === level) || [, NET_LEVELS[level] || level])[1];
+  function gdrill(id, level) { const d = S.gdrill[id]; return d && d.level === level && level !== "outlet" ? d : null; }
+  const gpickAttr = (id, level) => (x) => (x.o ? outletAttr(x) : `data-gpick="${esc(id)}" data-glevel="${esc(level)}" data-gkey="${esc(x.key)}" tabindex="0" title="List ${esc(x.name)}'s outlets"`);
+  const gBanner = (id, d) => (d ? `<div class="drill-banner">Showing the outlets of <strong>${esc(levelName(d.level))}: ${esc(d.key)}</strong> within the sidebar filters. <button type="button" data-gclear="${esc(id)}">Back to all ${esc(levelName(d.level).toLowerCase())}s</button></div>` : "");
 
   function pageOverview() {
     const r = rep(), list = inView(), a = agg(list);
@@ -383,9 +390,12 @@
       </tbody></table></div></section>`;
     const cats = r.categories || {};
     const catRows = (cats.sply || []).map((c) => ({ ...c, m: (cats.splm || []).find((x) => x.cat === c.cat) }));
+    const ovd = gdrill("ov-league", "rl");
     const league = mountTable("ov-league", {
-      title: "Regional leaders", desc: (n) => `${n} regional leaders. Achievement and growth for the outlets in view.`, file: "regional_leaders",
-      rows: levelRows(list, "rl"), cols: achCols(r, "rl"), key: (x) => x.key, searchText: (x) => x.name, defaultSort: "ach", pageSize: 25,
+      title: ovd ? `Outlets of ${ovd.key}` : "Regional leaders", file: ovd ? `outlets_${ovd.key}` : "regional_leaders", banner: gBanner("ov-league", ovd),
+      desc: (n) => (ovd ? `${n} outlets. Click an outlet for its profile.` : `${n} regional leaders. Achievement and growth for the outlets in view. Click a leader to list their outlets.`),
+      rows: ovd ? levelRows(list.filter((o) => o.dim.rl === ovd.key), "outlet") : levelRows(list, "rl"), cols: achCols(r, ovd ? "outlet" : "rl"),
+      key: (x) => x.key, searchText: (x) => `${x.name} ${x.sub}`, defaultSort: "ach", pageSize: 25, rowAttr: gpickAttr("ov-league", "rl"),
     });
     return `
       <div class="kpis ov-kpis">
@@ -408,16 +418,16 @@
   function pageAchievement() {
     const r = rep();
     if (!r) return `<p class="empty">No sales report is loaded yet. Check the Data quality page.</p>`;
-    const list = inView(), a = agg(list);
-    let rows = levelRows(list, S.level);
+    const list = inView(), a = agg(list), ad = gdrill("ach", S.level), lv = ad ? "outlet" : S.level;
+    let rows = ad ? levelRows(list.filter((o) => o.dim[S.level] === ad.key), "outlet") : levelRows(list, S.level);
     if (S.bands.size) rows = rows.filter((x) => S.bands.has(band(x.ach).k));
     const tools = `<select class="sel" data-level aria-label="Group by">${LEVELS.map(([k, t]) => `<option value="${k}" ${S.level === k ? "selected" : ""}>${esc(t)}</option>`).join("")}</select>
       ${BANDS.concat([{ k: "none", label: "No target" }]).map((b) => `<button class="btn" aria-pressed="${S.bands.has(b.k)}" data-band="${b.k}">${esc(b.label)}</button>`).join("")}`;
     const lvlName = LEVELS.find((l) => l[0] === S.level)[1];
     const table = mountTable("ach", {
       title: `Achievement by ${lvlName.toLowerCase()}`, file: `achievement_by_${S.level}`,
-      desc: (n) => `${int(n)} rows. ${r.closed ? "Final month results." : "Target is prorated to the days elapsed; needed per day assumes an even daily target."}${S.level === "outlet" ? " Click a row for the outlet profile." : ""}`,
-      rows, cols: achCols(r, S.level), key: (x) => x.key, searchText: (x) => `${x.name} ${x.sub}`, defaultSort: "ach", tools, rowAttr: outletAttr,
+      desc: (n) => `${int(n)} rows. ${r.closed ? "Final month results." : "Target is prorated to the days elapsed; needed per day assumes an even daily target."}${lv === "outlet" ? " Click a row for the outlet profile." : " Click a row to list its outlets."}`,
+      rows, cols: achCols(r, lv), key: (x) => x.key, searchText: (x) => `${x.name} ${x.sub}`, defaultSort: "ach", tools, rowAttr: gpickAttr("ach", S.level), banner: gBanner("ach", ad),
       wire: (el) => {
         $("[data-level]", el).addEventListener("change", (e) => { S.level = e.target.value; S.tables.ach.page = 1; render(); });
         $$("[data-band]", el).forEach((b) => b.addEventListener("click", () => { const k = b.dataset.band; S.bands.has(k) ? S.bands.delete(k) : S.bands.add(k); S.tables.ach.page = 1; render(); }));
@@ -501,6 +511,17 @@
       tr.onclick = go; tr.onkeydown = (e) => { if (e.key === "Enter") go(); };
     });
     $$("[data-lpick-clear]", root).forEach((b) => (b.onclick = () => { S.lossPick = null; render(); }));
+    $$("[data-gpick]", root).forEach((tr) => {
+      const go = () => {
+        const id = tr.dataset.gpick, cur = S.gdrill[id], same = cur && cur.level === tr.dataset.glevel && cur.key === tr.dataset.gkey;
+        if (same) delete S.gdrill[id]; else S.gdrill[id] = { level: tr.dataset.glevel, key: tr.dataset.gkey };
+        if (S.tables[id]) { S.tables[id].page = 1; S.tables[id].q = ""; }
+        render();
+        if (!same) requestAnimationFrame(() => $("#t-" + id)?.scrollIntoView({ behavior: "smooth", block: "start" }));
+      };
+      tr.onclick = go; tr.onkeydown = (e) => { if (e.key === "Enter") go(); };
+    });
+    $$("[data-gclear]", root).forEach((b) => (b.onclick = () => { delete S.gdrill[b.dataset.gclear]; render(); }));
     wireNet(root);
   }
 
@@ -512,9 +533,10 @@
       const a = cagg(list.filter((o) => inScope(o, scope, c)), c);
       return kpi({ label, value: delta(a.gs), sub: `${int(a.n)} outlets`, foot: `<span>${bdt(a.s)}</span><span>${CMP[c]} ${bdt(a.s0)}</span>`, accent });
     };
-    const rows = groupRows(list.filter((o) => inScope(o, S.scope, c)), S.level, (os) => cagg(os, c));
+    const gd = gdrill("growth", S.level), lv = gd ? "outlet" : S.level;
+    const rows = groupRows(list.filter((o) => inScope(o, S.scope, c) && (!gd || o.dim[S.level] === gd.key)), lv, (os) => cagg(os, c));
     const scopeName = SCOPES.find((x) => x[0] === S.scope)[1].toLowerCase();
-    const cols = [nameCol(S.level), ...(S.level === "outlet" ? [] : [nCol]),
+    const cols = [nameCol(lv), ...(lv === "outlet" ? [] : [nCol]),
       { k: "s", label: "Sales", num: 1, fmt: (x) => bdt(x.s), csv: (x) => Math.round(x.s) },
       { k: "s0", label: `Sales ${CMP[c]}`, num: 1, fmt: (x) => bdt(x.s0), csv: (x) => Math.round(x.s0) },
       { k: "gs", label: "Growth", num: 1, fmt: (x) => delta(x.gs), csv: (x) => pcsv(x.gs) },
@@ -523,8 +545,8 @@
       { k: "gpd", label: "GP margin change", num: 1, fmt: (x) => delta(x.gpd, "pp"), csv: (x) => pcsv(x.gpd) }];
     const table = mountTable("growth", {
       title: `Growth ${CMP[c] === "last year" ? "vs last year" : "vs last month"}, ${scopeName}`, file: `growth_${c}_${S.scope}_${S.level}`,
-      desc: (n) => `${int(n)} rows. ${cmpLabel(r)}.${S.scope === "same" ? " Same store follows the report's own same-store list." : ""}`,
-      rows, cols, key: (x) => x.key, searchText: (x) => `${x.name} ${x.sub}`, defaultSort: "gs", rowAttr: outletAttr,
+      desc: (n) => `${int(n)} rows. ${cmpLabel(r)}.${S.scope === "same" ? " Same store follows the report's own same-store list." : ""}${lv === "outlet" ? " Click a row for the outlet profile." : " Click a row to list its outlets."}`,
+      rows, cols, key: (x) => x.key, searchText: (x) => `${x.name} ${x.sub}`, defaultSort: "gs", rowAttr: gpickAttr("growth", S.level), banner: gBanner("growth", gd),
       tools: `${cmpSeg()}${seg("scope", SCOPES, "Stores")}${levelSel()}`,
     });
     return `<div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
@@ -536,8 +558,9 @@
   function pageFootfall() {
     const r = rep(); if (!r) return noData();
     const c = S.cmp, list = inView().filter((o) => inScope(o, S.scope, c)), a = cagg(list, c);
-    const rows = groupRows(list, S.level, (os) => cagg(os, c));
-    const cols = [nameCol(S.level), ...(S.level === "outlet" ? [] : [nCol]),
+    const fd = gdrill("footfall", S.level), lv = fd ? "outlet" : S.level;
+    const rows = groupRows(fd ? list.filter((o) => o.dim[S.level] === fd.key) : list, lv, (os) => cagg(os, c));
+    const cols = [nameCol(lv), ...(lv === "outlet" ? [] : [nCol]),
       { k: "f", label: "Footfall", num: 1, fmt: (x) => int(x.f), csv: (x) => Math.round(x.f) },
       { k: "f0", label: `Footfall ${CMP[c]}`, num: 1, fmt: (x) => int(x.f0), csv: (x) => Math.round(x.f0) },
       { k: "gf", label: "Footfall growth", num: 1, fmt: (x) => delta(x.gf), csv: (x) => pcsv(x.gf) },
@@ -548,8 +571,8 @@
     const days = r.closed ? r.dim : r.day;
     const table = mountTable("footfall", {
       title: `Footfall and bill value ${S.cmp === "y" ? "vs last year" : "vs last month"}`, file: `footfall_${c}_${S.scope}_${S.level}`,
-      desc: (n) => `${int(n)} rows. Bill value is sales divided by customers. ${cmpLabel(r)}.`,
-      rows, cols, key: (x) => x.key, searchText: (x) => `${x.name} ${x.sub}`, defaultSort: "gf", rowAttr: outletAttr,
+      desc: (n) => `${int(n)} rows. Bill value is sales divided by customers. ${cmpLabel(r)}.${lv === "outlet" ? " Click a row for the outlet profile." : " Click a row to list its outlets."}`,
+      rows, cols, key: (x) => x.key, searchText: (x) => `${x.name} ${x.sub}`, defaultSort: "gf", rowAttr: gpickAttr("footfall", S.level), banner: gBanner("footfall", fd),
       tools: `${cmpSeg()}${seg("scope", SCOPES, "Stores")}${levelSel()}`,
     });
     return `<div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
@@ -572,13 +595,14 @@
     const c = S.cmp, list = inView().filter((o) => inScope(o, S.scope, c));
     const comp = list.filter((o) => o.s > 0 && o["s" + c] > 0);
     const fresh = list.filter((o) => o.s > 0 && !(o["s" + c] > 0)).length, gone = list.filter((o) => !(o.s > 0) && o["s" + c] > 0).length;
-    let rows = groupRows(comp, "outlet", (os) => cagg(os, c));
+    const rd = gdrill("rank", "rl");
+    let rows = groupRows(rd ? comp.filter((o) => o.dim.rl === rd.key) : comp, "outlet", (os) => cagg(os, c));
     rows.forEach((x) => (x.drv = driver(x)));
     const grow = rows.filter((x) => x.gs > 0).length, dec = rows.filter((x) => x.gs < 0).length;
     if (S.trend === "up") rows = rows.filter((x) => x.gs > 0);
     if (S.trend === "down") rows = rows.filter((x) => x.gs < 0);
     const t1 = mountTable("rank", {
-      title: "Outlet ranking", file: `growth_ranking_${c}_${S.trend}`,
+      title: "Outlet ranking", file: `growth_ranking_${c}_${S.trend}`, banner: gBanner("rank", rd),
       desc: (n) => `${int(n)} comparable outlets (sales in both periods). Main driver is whichever of footfall or bill value moved sales more. Click a row for the outlet profile.`,
       rows, key: (x) => x.key, searchText: (x) => `${x.name} ${x.sub}`, defaultSort: "gs", defaultDir: S.trend === "down" ? "asc" : "desc", rowAttr: outletAttr,
       tools: `${cmpSeg()}${seg("trend", [["all", "All"], ["up", "Growing"], ["down", "Declining"]], "Trend")}${seg("scope", SCOPES, "Stores")}`,
@@ -594,7 +618,8 @@
     const byRl = groupRows(comp, "rl", (os) => { const g = os.map((o) => cagg([o], c)); const up = g.filter((x) => x.gs > 0).length, dn = g.filter((x) => x.gs < 0).length; return { ...cagg(os, c), up, dn, share: os.length ? dn / os.length : null }; });
     const t2 = mountTable("rank-rl", {
       title: "Growing and declining outlets by regional leader", file: `growth_by_rl_${c}`, pageSize: 25,
-      desc: (n) => `${n} regional leaders, comparable outlets only.`, rows: byRl, key: (x) => x.key, searchText: (x) => x.name, defaultSort: "share",
+      desc: (n) => `${n} regional leaders, comparable outlets only. Click a leader to list their outlets in the ranking.`, rows: byRl, key: (x) => x.key, searchText: (x) => x.name, defaultSort: "share",
+      rowAttr: (x) => `data-gpick="rank" data-glevel="rl" data-gkey="${esc(x.key)}" data-gscroll="1" tabindex="0" title="List ${esc(x.name)}'s outlets"${rd && rd.key === x.key ? ' aria-selected="true"' : ""}`,
       cols: [nameCol("rl"), { k: "n", label: "Comparable outlets", num: 1, fmt: (x) => int(x.n) },
         { k: "up", label: "Growing", num: 1, fmt: (x) => `<span class="up">${int(x.up)}</span>` }, { k: "dn", label: "Declining", num: 1, fmt: (x) => `<span class="down">${int(x.dn)}</span>` },
         { k: "share", label: "Share declining", num: 1, fmt: (x) => pct(x.share), csv: (x) => pcsv(x.share) }, { k: "gs", label: "Growth", num: 1, fmt: (x) => delta(x.gs), csv: (x) => pcsv(x.gs) }],
@@ -1553,11 +1578,13 @@
       <div class="chart"><svg id="trajectoryChart" role="img" aria-label="Cumulative sales against target across the month"></svg></div><p class="chart-note" id="trajectoryNote"></p></div></section>`;
 
     // league table
-    const lg = st.league, lgName = NET_LEVELS[lg];
+    const lg = st.league, gmd = gdrill("gm-league", lg), lgName = gmd ? "Outlet" : NET_LEVELS[lg];
     const league = mountTable("gm-league", {
-      title: `${lgName} league table`, file: `${lg}_league_table`, stamp: S.netTo,
-      desc: (n) => `${int(n)} ${lgName.toLowerCase()} groups. Click a heading to sort; sorted by projected month-end sales until you pick a column. The CSV has every column.`,
-      rows: netGroup(list, lg), key: (x) => x.name, searchText: (x) => x.name, defaultSort: "projected", pageSize: 50,
+      title: gmd ? `Outlets of ${gmd.key}` : `${lgName} league table`, file: gmd ? `outlets_${gmd.key}` : `${lg}_league_table`, stamp: S.netTo,
+      desc: (n) => (gmd ? `${int(n)} outlets. Click an outlet for its profile.` : `${int(n)} ${lgName.toLowerCase()} groups. Click a row to list its outlets; click a heading to sort. The CSV has every column.`),
+      rows: gmd ? netGroup(list.filter((r) => disp(r[netKey(lg)]) === gmd.key), "outlet") : netGroup(list, lg), key: (x) => x.name, searchText: (x) => `${x.name} ${x.sub}`, defaultSort: "projected", pageSize: 50,
+      banner: gBanner("gm-league", gmd),
+      rowAttr: (x) => (x.code ? `data-noutlet="${esc(x.code)}" tabindex="0"` : `data-gpick="gm-league" data-glevel="${esc(lg)}" data-gkey="${esc(x.name)}" tabindex="0" title="List ${esc(x.name)}'s outlets"`),
       tools: nseg("gm.league", [["regionalHead", "Regional head"], ["zonal", "Zonal"], ["division", "Division"], ["format", "Format"]], "League level"),
       cols: [
         { k: "name", label: lgName, fmt: (x) => `<span class="cell-primary" title="${esc(x.sub)}">${esc(x.name)}</span>`, csv: (x) => x.name },
@@ -2091,7 +2118,7 @@
     try { localStorage.setItem("opsdash-theme", t); } catch (e) {}
     if (NET_PAGES.has(S.page)) render(); // charts resolve colour tokens when drawn
   });
-  $("#resetBtn").addEventListener("click", () => { DIMS.concat(NET_DIMS).forEach(([k]) => S.filters[k].clear()); S.bands.clear(); S.on.drill = null; S.lossPick = null; changed(); });
+  $("#resetBtn").addEventListener("click", () => { DIMS.concat(NET_DIMS).forEach(([k]) => S.filters[k].clear()); S.bands.clear(); S.on.drill = null; S.lossPick = null; S.gdrill = {}; changed(); });
   applyRail();
   $("#railBtn").addEventListener("click", () => { UI.railHidden = !UI.railHidden; saveUI(); applyRail(); });
   $("#menuBtn").addEventListener("click", () => { $("#rail").classList.add("open"); $("#scrim").hidden = false; });

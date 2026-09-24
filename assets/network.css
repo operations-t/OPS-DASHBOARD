@@ -168,3 +168,5 @@
 .stat-strip.net-strip strong{display:inline;font-size:17px}
 tr[data-lpick]{cursor:pointer}
 tr[data-lpick][aria-selected="true"] td{background:var(--info-soft)}
+tr[data-gpick]{cursor:pointer}
+tr[data-gpick][aria-selected="true"] td{background:var(--info-soft)}
