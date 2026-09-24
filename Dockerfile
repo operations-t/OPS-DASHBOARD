@@ -3,12 +3,13 @@
 FROM nginx:1.27-alpine
 
 RUN apk add --no-cache python3 py3-pip openssl tzdata \
- && pip3 install --no-cache-dir --break-system-packages "openpyxl==3.1.5" "gdown>=5.2,<6"
+ && pip3 install --no-cache-dir --break-system-packages "openpyxl==3.1.5" "gdown>=5.2,<6" "xlrd>=2.0,<3"
 
 ENV TZ=Asia/Dhaka \
     REFRESH_MINUTES=60 \
     DATA_OUT=/usr/share/nginx/html/data/data.json \
-    NETWORK_OUT=/usr/share/nginx/html/data/network.json
+    NETWORK_OUT=/usr/share/nginx/html/data/network.json \
+    CW_OUT=/usr/share/nginx/html/data/cw.json
 
 COPY index.html /usr/share/nginx/html/
 COPY assets /usr/share/nginx/html/assets

@@ -8,6 +8,7 @@ on:
       - assets/**
       - data/data.json
       - data/network.json
+      - data/cw.json
       - .nojekyll
       - .github/workflows/deploy-pages.yml
   workflow_dispatch:

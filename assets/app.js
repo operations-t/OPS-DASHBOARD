@@ -10,17 +10,18 @@
     { group: "", items: [["gm", "Growth & momentum"], ["on", "Outlet network"]] },
     { group: "Sales", items: [["overview", "Overview"], ["achievement", "Sales achievement"], ["growth", "Sales growth"], ["footfall", "Footfall and basket"], ["ranking", "Growth and degrowth"], ["loss", "Loss-making outlets"], ["category", "Category performance"]] },
     { group: "Performance", items: [["performance", "KPI performance"]] },
-    { group: "Connected dashboards", items: [["av", "Availability"], ["cw", "Consumable and wastage"], ["gpva", "GPVA% Tracker"], ["cc", "Credit Card Extra Amount"], ["vc", "Visit Compliance"]] },
+    { group: "Consumable and wastage", items: [["cw", "Overview"], ["cwl", "League tables"], ["cwx", "Exceptions"], ["cwb", "Benchmarks"], ["cwm", "Materials"], ["cwo", "Outlet register"]] },
+    { group: "Connected dashboards", items: [["av", "Availability"], ["gpva", "GPVA% Tracker"], ["cc", "Credit Card Extra Amount"], ["vc", "Visit Compliance"]] },
     { group: "System", items: [["dq", "Data quality"]] },
   ];
-  const TITLES = Object.fromEntries(NAV.flatMap((g) => g.items.map(([k, t]) => [k, t])));
+  const TITLES = Object.fromEntries(NAV.flatMap((g) => g.items.map(([k, t]) => [k, g.group === "Consumable and wastage" ? `Consumable and wastage: ${t.toLowerCase()}` : t])));
   const SALES_PAGES = new Set(["overview", "achievement", "growth", "footfall", "ranking"]);
   const PERIOD_PAGES = new Set([...SALES_PAGES, "category"]);
   const NET_PAGES = new Set(["gm", "on"]);
-  const FILTER_PAGES = new Set([...SALES_PAGES, "loss", ...NET_PAGES]);
+  const CW_PAGES = new Set(["cw", "cwl", "cwx", "cwb", "cwm", "cwo"]);
+  const FILTER_PAGES = new Set([...SALES_PAGES, "loss", ...NET_PAGES, ...CW_PAGES]);
   const EMBEDS = {
     av: { url: "https://operations-t.github.io/AV/", desc: "Core, KVI, promo and e-commerce availability by outlet and SKU." },
-    cw: { url: "https://operations-t.github.io/consumable-wastage-n/", desc: "Consumable and wastage cost against target by outlet." },
     gpva: { url: "https://outlet-wise-gpva.shwapno.app/", desc: "Outlet-wise GPVA% tracking." },
     cc: { url: "https://aftabz-lab.github.io/credit-card-extra-amount/", desc: "Credit card extra amount by outlet." },
     vc: { url: "https://aftabz-lab.github.io/visit-compliance-dashboard/", desc: "Outlet visit schedules and compliance." },
@@ -28,6 +29,8 @@
   const DIMS = [["rl", "Regional leader"], ["zn", "Zonal"], ["div", "Division"], ["dis", "District"], ["fmt", "Outlet format"], ["own", "Ownership"], ["pnp", "PNP status"], ["loc", "Location type"]];
   // Extra outlet-master fields, filterable on the outlet network pages only.
   const NET_DIMS = [["area", "Area"], ["city", "Location type (Dv, Ds, T)"], ["floor", "Floor type"], ["shape", "Layout shape"]];
+  const CW_DIMS = [["area", "Area"], ["crit", "Final criteria"]];
+  const CW_LEVELS = { zone: "Zonal", regionalLeader: "Regional leader", division: "Division", district: "District", criteria: "Final criteria", outlet: "Outlet" };
   const LEVELS = [["rl", "Regional leader"], ["zn", "Zonal"], ["div", "Division"], ["dis", "District"], ["fmt", "Outlet format"], ["own", "Ownership"], ["outlet", "Outlet"]];
   const BANDS = [
     { k: "b100", label: "100% or more", cls: "good", min: 1 },
@@ -40,10 +43,12 @@
     cmp: "y", scope: "all", trend: "all", kp: null, kl: "rho", kv: "rank", pm: null, pbasis: "before", pstat: "all", plevel: "rl", ageDrill: null,
     net: null, netLoading: false, netErr: null, netMode: "through", netFrom: "", netTo: "",
     gdrill: {},
+    cw: null, cwLoading: false, cwErr: null, cwCrit: null,
+    cwv: { from: "", to: "", compare: false, status: "all", statusMetric: "consumableRate", basis: "daily", rankDim: "zone", rankMetric: "consumableRate", moversMetric: "consumableRate", leagueDim: "zone", leagueMetric: "consumableRate", excMetric: "all", benchMetric: "consumableRate" },
     on: { league: "regionalHead", oversight: "regional", launch: "year", cols: "key", drill: null },
     gm: { quad: "regionalHead", mover: "regionalHead", dir: "gain", league: "regionalHead" } };
-  DIMS.concat(NET_DIMS).forEach(([k]) => (S.filters[k] = new Set()));
-  const dims = () => (NET_PAGES.has(S.page) ? DIMS.concat(NET_DIMS) : DIMS);
+  DIMS.concat(NET_DIMS, CW_DIMS).forEach(([k]) => (S.filters[k] = new Set()));
+  const dims = () => (NET_PAGES.has(S.page) ? DIMS.concat(NET_DIMS) : CW_PAGES.has(S.page) ? DIMS.concat(CW_DIMS) : DIMS);
   let AFTER = [];
 
   // ------------------------------------------------------------------ format
@@ -95,7 +100,7 @@
   }
   const rep = () => S.data?.[S.period];
   const matches = (o, skip) => dims().every(([k]) => k === skip || !S.filters[k].size || S.filters[k].has(o.dim[k]));
-  const baseList = () => (NET_PAGES.has(S.page) ? netRows() : S.page === "loss" ? pnlList() : rep()?.outlets || []);
+  const baseList = () => (NET_PAGES.has(S.page) ? netRows() : CW_PAGES.has(S.page) ? S.cw?.outlets || [] : S.page === "loss" ? pnlList() : rep()?.outlets || []);
   const inView = () => baseList().filter((o) => matches(o));
   function pnlList() {
     const P = S.data?.pnl;
@@ -306,6 +311,12 @@
       $$("#periodSeg button").forEach((b) => b.addEventListener("click", () => { S.period = b.dataset.period; changed(); }));
       const g = new Date(d.generated);
       $("#fresh").textContent = "Data updated " + g.toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Dhaka" }).replace("Sept", "Sep");
+      if (CW_PAGES.has(S.page)) {
+        const c = S.cw;
+        if (c) $("#fresh").textContent = "Data updated " + new Date(c.generatedAt).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Dhaka" }).replace("Sept", "Sep");
+        $("#scope").textContent = c ? `${fdate(S.cwv.from)} to ${fdate(S.cwv.to)}. ${int(inView().length)} of ${int(baseList().length)} outlets in view.` : "";
+        return;
+      }
       if (NET_PAGES.has(S.page)) {
         const n = S.net;
         if (n && driveNote()) $("#fresh").textContent = "Drive data " + driveNote();
@@ -374,7 +385,7 @@
   const outletAttr = (x) => (x.o ? `data-outlet="${esc(x.o.c)}" tabindex="0"` : "");
   // Group drill: clicking a regional leader, zonal or other group row lists that group's outlets.
   // S.gdrill[tableId] = { level, key }; it only applies while the table is still grouped by that level.
-  const levelName = (level) => (LEVELS.find((l) => l[0] === level) || [, NET_LEVELS[level] || level])[1];
+  const levelName = (level) => (LEVELS.find((l) => l[0] === level) || [, CW_LEVELS[level] || NET_LEVELS[level] || level])[1];
   function gdrill(id, level) { const d = S.gdrill[id]; return d && d.level === level && level !== "outlet" ? d : null; }
   const gpickAttr = (id, level) => (x) => (x.o ? outletAttr(x) : `data-gpick="${esc(id)}" data-glevel="${esc(level)}" data-gkey="${esc(x.key)}" tabindex="0" title="List ${esc(x.name)}'s outlets"`);
   const gBanner = (id, d) => (d ? `<div class="drill-banner">Showing the outlets of <strong>${esc(levelName(d.level))}: ${esc(d.key)}</strong> within the sidebar filters. <button type="button" data-gclear="${esc(id)}">Back to all ${esc(levelName(d.level).toLowerCase())}s</button></div>` : "");
@@ -455,6 +466,7 @@
       <section class="panel"><div class="panel-head"><div><h2>Checks from the last refresh</h2><p>${d.issues.filter((i) => i.level === "error").length} problems, ${d.issues.filter((i) => i.level === "warn").length} warnings</p></div></div>
         <div class="panel-body">${d.issues.map((i) => `<div class="issue"><span>${chip({ cls: lvl[i.level], label: name[i.level] })}</span><div>${esc(i.message)}<small>${esc(i.source)}</small></div></div>`).join("") || '<p class="muted">All checks passed.</p>'}</div></section>
       ${netFilesPanel()}
+      ${cwQualityPanel()}
       <section class="panel"><div class="panel-head"><div><h2>How updates work</h2></div></div>
         <div class="panel-body"><p style="margin:0;max-width:72ch">Upload or replace a file in its Google Drive folder. The dashboard checks the folders every hour between 8 am and 11 pm and refreshes on its own. To refresh straight away, open the repository on GitHub, go to Actions, choose "Refresh data" and press "Run workflow". If a file is broken, the dashboard keeps the last good data and the problem appears on this page.</p></div></section>`;
   }
@@ -523,6 +535,7 @@
     });
     $$("[data-gclear]", root).forEach((b) => (b.onclick = () => { delete S.gdrill[b.dataset.gclear]; render(); }));
     wireNet(root);
+    wireCw(root);
   }
 
   // ------------------------------------------------------------------ sales growth
@@ -1167,12 +1180,12 @@
   }
   const levelDrill = (level, name) => { const key = netKey(level); setDrill(NET_LEVELS[level], [name], (r) => disp(r[key])); };
   const NCSV = {};
-  function saveCsv(name, header, rows) {
+  function saveCsv(name, header, rows, stamp) {
     const q = (v) => { const s = v == null ? "" : String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
     const blob = new Blob(["﻿" + [header].concat(rows).map((r) => r.map(q).join(",")).join("\n")], { type: "text/csv;charset=utf-8" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = `${name}_${S.netTo || "data"}.csv`;
+    a.download = `${name}_${stamp || S.netTo || "data"}.csv`;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   }
@@ -2046,6 +2059,539 @@
     $$("[data-nreport]", root).forEach((b) => (b.onclick = openReport));
   }
 
+  // ------------------------------------------------------------------ consumable & wastage
+  // data/cw.json is built by scripts/cw/refresh.py from the Consumable & Wastage Control Drive folder
+  // (Target.txt, Sales-Till, Zone Distribution, CONSUMABLE and WASTAGE SAP exports). Loaded on first visit.
+  // Aggregate rule everywhere: sum(numerator) / sum(denominator); outlet percentages are never averaged
+  // for a business result, except the benchmark "outlet average", which is labelled as such.
+  const CWM = {
+    // Consumable issues post to SAP in batches, so the denominator is each outlet's sales up to its own
+    // last consumable posting day inside the selected range (consumableSales), not plain sales.
+    consumableRate: { label: "Consumable % on sales", short: "Consumable %", num: "consumable", den: "consumableSales", target: "consumableTarget", valueLabel: "Consumable value" },
+    wastageSalesRate: { label: "Wastage % on sales", short: "Wastage on sales %", num: "wastage", den: "sales", target: "wastageSalesTarget", valueLabel: "Wastage value" },
+    wastagePnpRate: { label: "Wastage % on PNP sales", short: "Wastage on PNP %", num: "wastage", den: "pnpSales", target: "wastagePnpTarget", valueLabel: "Wastage value" },
+  };
+  const CWK = Object.keys(CWM);
+  const CW_TOL = 0.0001; // 0.01 percentage point
+  const CW_METRIC_OPTS = CWK.map((k) => [k, CWM[k].short]);
+  const CW_STATUS = [["all", "All outlets"], ["above", "Above any target"], ["within", "Within all targets"], ["unmapped", "Unmapped outlets"], ["reversal", "Net reversal outlets"]];
+  function cwStatus(actual, target, numerator = 0) {
+    if (!isNum(actual) || !isNum(target)) return { key: "neutral", cls: "idle", label: "No target" };
+    if (numerator < 0) return { key: "info", cls: "info", label: "Net reversal" };
+    if (Math.abs(actual - target) <= CW_TOL) return { key: "near", cls: "warn", label: "At target" };
+    return actual < target ? { key: "good", cls: "good", label: "Within target" } : { key: "bad", cls: "bad", label: "Above target" };
+  }
+  function cwAvgVs(avg, target) {
+    if (!isNum(avg) || !isNum(target)) return { cls: "idle", label: "Not comparable" };
+    if (Math.abs(avg - target) <= CW_TOL) return { cls: "warn", label: "Average at target" };
+    return avg < target ? { cls: "good", label: "Target > Outlet avg" } : { cls: "bad", label: "Outlet avg > Target" };
+  }
+  const shiftDay = (iso, n) => { const d = new Date(iso + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+  const dayCount = (a, b) => Math.round((Date.parse(b + "T00:00:00Z") - Date.parse(a + "T00:00:00Z")) / 86400000) + 1;
+  const pts = (v, d = 2) => (isNum(v) ? (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v * 100).toFixed(d) + " pp" : "—");
+  const cwPct = (v) => pct(v, 2);
+  const csv4 = (v) => (isNum(v) ? (v * 100).toFixed(4) : "");
+
+  function loadCw() {
+    if (S.cw || S.cwLoading) return;
+    S.cwLoading = true; S.cwErr = null;
+    fetch("data/cw.json", { cache: "no-cache" })
+      .then((r) => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+      .then((d) => { prepCw(d); S.cw = d; })
+      .catch((e) => { S.cwErr = e.message; })
+      .finally(() => { S.cwLoading = false; if (CW_PAGES.has(S.page) || S.page === "dq") render(); });
+  }
+  function prepCw(d) {
+    const v = (x) => (x == null || String(x).trim() === "" ? NET_MISS : String(x).trim());
+    d.outlets.forEach((o) => {
+      const own = /^own/i.test(o.ownership || "") ? "Own" : /^fr/i.test(o.ownership || "") ? "Franchise" : o.ownership;
+      o.c = o.code; o.nm = o.name;
+      o.dim = { rl: v(o.regionalLeader), zn: v(o.zone), div: v(o.division), dis: v(o.district), fmt: v(o.format), own: v(own), pnp: v(o.pnpStatus), loc: v(o.locationType), area: v(o.area), crit: v(o.criteria) };
+    });
+    d.byCode = new Map(d.outlets.map((o) => [o.code, o]));
+    S.cwv.from = d.dateRange.min; S.cwv.to = d.dateRange.max;
+  }
+  function cwGuard() {
+    if (S.cw) return "";
+    loadCw();
+    return S.cwErr
+      ? `<p class="empty">The consumable and wastage data could not be loaded (${esc(S.cwErr)}). Run the "Refresh data" workflow on GitHub, then reload this page.</p>`
+      : '<p class="empty">Loading consumable and wastage data…</p>';
+  }
+
+  // ---- aggregation (unchanged rules from the consumable & wastage dashboard)
+  const cwEmpty = () => ({ sales: 0, pnpSales: 0, consumable: 0, wastage: 0, consumableSales: 0 });
+  function cwAdd(b, r) { b.sales += r.sales || 0; b.pnpSales += r.pnpSales || 0; b.consumable += r.consumable || 0; b.wastage += r.wastage || 0; b.consumableSales += r.consumableSales || 0; }
+  // Last day each outlet posted consumable value inside the range. A day whose issues and reversals
+  // cancel to zero booked nothing, so it does not extend the window.
+  let cwCutCache = { key: null, map: null };
+  function cwCutoffs(from, to) {
+    const key = from + "|" + to;
+    if (cwCutCache.key === key) return cwCutCache.map;
+    const map = new Map();
+    for (const r of S.cw.daily) {
+      if (!r.consumable || r.date < from || r.date > to) continue;
+      const cur = map.get(r.code);
+      if (cur === undefined || r.date > cur) map.set(r.code, r.date);
+    }
+    return (cwCutCache = { key, map }).map;
+  }
+  // Stamp each daily row with the sales that count towards its outlet's consumable rate, so every
+  // aggregation path inherits the rule. One window is live at a time.
+  function cwStamp(from, to) {
+    const cut = cwCutoffs(from, to);
+    for (const r of S.cw.daily) { const c = cut.get(r.code); r.consumableSales = r.date >= from && r.date <= to && c && r.date <= c ? r.sales || 0 : 0; }
+  }
+  function cwDecorate(o, b) {
+    const m = { ...o, ...(b || cwEmpty()) };
+    m.statuses = {}; m.excess = {};
+    CWK.forEach((k) => {
+      const def = CWM[k];
+      m[k] = ratio(m[def.num], m[def.den]);
+      m.statuses[k] = cwStatus(m[k], m[def.target], m[def.num]);
+      const t = m[def.target], base = m[def.den];
+      // Taka over target: this is what ranks the exception list financially.
+      m.excess[k] = isNum(m[k]) && isNum(t) && base > 0 && m[k] > t ? (m[k] - t) * base : 0;
+    });
+    m.aboveAny = CWK.some((k) => m.statuses[k].key === "bad");
+    m.hasTarget = CWK.some((k) => m.statuses[k].key !== "neutral");
+    m.withinAll = m.hasTarget && !m.aboveAny;
+    // Wastage on sales and on PNP describe the same taka twice, so only the larger counts.
+    m.excessConsumable = m.excess.consumableRate;
+    m.excessWastage = Math.max(m.excess.wastageSalesRate, m.excess.wastagePnpRate);
+    m.excessTotal = m.excessConsumable + m.excessWastage;
+    return m;
+  }
+  function cwWeightedTarget(list, k) {
+    const def = CWM[k]; let w = 0, d = 0;
+    list.forEach((r) => { const base = r[def.den] || 0, t = r[def.target]; if (base > 0 && isNum(t)) { w += base * t; d += base; } });
+    return d > 0 ? w / d : null;
+  }
+  function cwSummarize(list) {
+    const s = { ...cwEmpty(), aboveAny: 0, mapped: 0, excessConsumable: 0, excessWastage: 0, excessTotal: 0, outlets: list.length, targets: {}, averages: {}, statuses: {} };
+    list.forEach((r) => { cwAdd(s, r); s.aboveAny += +r.aboveAny; s.mapped += +r.mapped; s.excessConsumable += r.excessConsumable || 0; s.excessWastage += r.excessWastage || 0; s.excessTotal += r.excessTotal || 0; });
+    CWK.forEach((k) => {
+      const def = CWM[k], vals = list.map((r) => r[k]).filter(isNum);
+      s[k] = ratio(s[def.num], s[def.den]);
+      s.targets[k] = cwWeightedTarget(list, k);
+      s.averages[k] = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+      s.statuses[k] = cwStatus(s[k], s.targets[k], s[def.num]);
+    });
+    return s;
+  }
+  function cwBuckets(codes, from, to) {
+    const b = new Map(); codes.forEach((c) => b.set(c, cwEmpty()));
+    for (const r of S.cw.daily) { if (r.date < from || r.date > to) continue; const x = b.get(r.code); if (x) cwAdd(x, r); }
+    const cut = cwCutoffs(from, to);
+    b.forEach((x, c) => (x.consumableCutoff = cut.get(c) || null));
+    return b;
+  }
+  function cwDaily(codes, from, to) {
+    const m = new Map();
+    for (const r of S.cw.daily) {
+      if (!codes.has(r.code) || r.date < from || r.date > to) continue;
+      if (!m.has(r.date)) m.set(r.date, { date: r.date, ...cwEmpty() });
+      cwAdd(m.get(r.date), r);
+    }
+    const out = [...m.values()].sort((a, b) => a.date.localeCompare(b.date));
+    out.forEach((x) => CWK.forEach((k) => (x[k] = ratio(x[CWM[k].num], x[CWM[k].den]))));
+    return out;
+  }
+  const CW_TESTS = { above: (r) => r.aboveAny, within: (r) => r.withinAll, unmapped: (r) => !r.mapped, reversal: (r) => r.consumable < 0 || r.wastage < 0 };
+  function cwView() {
+    const d = S.cw, f = S.cwv, from = f.from, to = f.to, bad = from > to;
+    const cand = inView();
+    if (!bad) cwStamp(from, to);
+    const buckets = bad ? new Map() : cwBuckets(cand.map((o) => o.code), from, to);
+    let metrics = cand.map((o) => cwDecorate(o, buckets.get(o.code)));
+    if (f.status !== "all") metrics = metrics.filter(CW_TESTS[f.status]);
+    const codes = new Set(metrics.map((r) => r.code));
+    const v = { from, to, bad, metrics, codes, daily: bad ? [] : cwDaily(codes, from, to), summary: cwSummarize(metrics), prior: null };
+    // Compare with the equal-length window just before the selection, only when it fits in the data.
+    const len = bad ? 0 : dayCount(from, to), pTo = shiftDay(from, -1), pFrom = shiftDay(pTo, -(len - 1));
+    v.priorPeriod = !bad && pFrom >= d.dateRange.min ? { from: pFrom, to: pTo } : null;
+    if (f.compare && v.priorPeriod) {
+      cwStamp(pFrom, pTo);
+      const pb = cwBuckets([...codes], pFrom, pTo);
+      const pm = metrics.map((r) => cwDecorate(d.byCode.get(r.code), pb.get(r.code)));
+      const byC = new Map(pm.map((r) => [r.code, r]));
+      metrics.forEach((r) => (r.prior = byC.get(r.code) || null));
+      v.prior = { from: pFrom, to: pTo, summary: cwSummarize(pm), daily: cwDaily(codes, pFrom, pTo) };
+      cwStamp(from, to); // restore the selected window for anything reading raw rows later
+    }
+    return v;
+  }
+  function cwGroups(metrics, dim) {
+    const g = new Map();
+    metrics.forEach((r) => { const k = dim === "outlet" ? r.code : r[dim] || "Unmapped"; if (!g.has(k)) g.set(k, []); g.get(k).push(r); });
+    return [...g].map(([key, rows]) => ({ key, name: dim === "outlet" ? rows[0].name : key, code: dim === "outlet" ? key : null, sub: dim === "outlet" ? `${key}, ${rows[0].zone}` : `${int(rows.length)} outlets`, rows, ...cwSummarize(rows) }));
+  }
+
+  // ---- shared page parts
+  const cwSel = (key, opts, label) => `<select class="sel" data-cwsel="${key}" aria-label="${esc(label)}">${opts.map(([v, t]) => `<option value="${v}" ${S.cwv[key] === v ? "selected" : ""}>${esc(t)}</option>`).join("")}</select>`;
+  function cwBar(v) {
+    const d = S.cw, f = S.cwv;
+    const quick = [["", "Quick period"], ["all", "Full loaded period"], ["7", "Last 7 days"], ["14", "Last 14 days"], ["mtd", "Month to date"]];
+    return `<section class="panel"><div class="panel-head"><div><h2>Period and scope</h2><p>${v.bad ? "The From date is after the To date." : `${fdate(f.from)} to ${fdate(f.to)}, ${dayCount(f.from, f.to)} days. Data loaded ${fdate(d.dateRange.min)} to ${fdate(d.dateRange.max)}.`}</p></div>
+      <div class="panel-tools">
+        <label class="net-date">From<input type="date" data-cwdate="from" value="${f.from}" min="${d.dateRange.min}" max="${d.dateRange.max}"></label>
+        <label class="net-date">To<input type="date" data-cwdate="to" value="${f.to}" min="${d.dateRange.min}" max="${d.dateRange.max}"></label>
+        <select class="sel" data-cwquick aria-label="Quick period">${quick.map(([k, t]) => `<option value="${k}">${t}</option>`).join("")}</select>
+        ${cwSel("status", CW_STATUS, "Performance status")}
+        <button class="btn" data-cwcompare aria-pressed="${!!(f.compare && v.prior)}" ${v.priorPeriod ? "" : "disabled"} title="${v.priorPeriod ? `Compare with ${fdate(v.priorPeriod.from)} to ${fdate(v.priorPeriod.to)}` : "No equal-length period before this one in the loaded data"}">Compare with prior period</button>
+      </div></div>
+      <div class="panel-body cw-raw"><span class="muted">Raw rows for the outlets and dates in view:</span>
+        <button class="btn" data-cwraw="daily">Outlet-day rows (CSV)</button>
+        <button class="btn" data-cwraw="materials">Material postings (CSV)</button></div></section>`;
+  }
+  const cwDelta = (cur, pri) => {
+    if (!isNum(cur) || !isNum(pri)) return "";
+    const ch = cur - pri;
+    if (Math.abs(ch) <= CW_TOL / 10) return '<span class="flat">■ no change</span>';
+    return `<span class="${ch > 0 ? "down" : "up"}">${ch > 0 ? "▲" : "▼"} ${pts(ch)}</span>`; // lower is better
+  };
+  const cwValDelta = (cur, pri) => (isNum(cur) && isNum(pri) && pri ? `<span class="flat">${cur >= pri ? "▲" : "▼"} ${Math.abs(((cur - pri) / Math.abs(pri)) * 100).toFixed(1)}%</span>` : "");
+  function cwKpis(v) {
+    const s = v.summary, p = v.prior?.summary;
+    const rateCard = (k, accent, foot) => kpi({ label: CWM[k].label, value: cwPct(s[k]), accent,
+      sub: `${chip(s.statuses[k])}<span>Target ${cwPct(s.targets[k])}</span>`,
+      foot: `<span>${foot}</span><span>${p ? cwDelta(s[k], p[k]) : chip({ ...cwAvgVs(s.averages[k], s.targets[k]), label: "Avg " + cwPct(s.averages[k]) })}</span>` });
+    const shares = s.excessTotal > 0 ? [s.excessConsumable, s.excessWastage].map((x) => Math.max(0, Math.min(100, (x / s.excessTotal) * 100))) : [0, 0];
+    return `<div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(210px,1fr))">
+      ${kpi({ label: "Overall POS NSI", value: bdt(s.sales), sub: `PNP sales <strong>${bdt(s.pnpSales)}</strong>`, foot: `<span>${int(s.outlets)} outlets</span><span>${p ? cwValDelta(s.sales, p.sales) : ""}</span>`, accent: "var(--series-2)" })}
+      ${rateCard("consumableRate", "var(--series-1)", `Value ${bdt(s.consumable)} on ${bdt(s.consumableSales)} base`)}
+      ${rateCard("wastageSalesRate", "var(--series-3)", `Value ${bdt(s.wastage)}`)}
+      ${rateCard("wastagePnpRate", "var(--series-2)", "FRESH PRODUCE base")}
+      <div class="kpi" style="--accent:var(--bad)"><span class="label">Amount above target</span><span class="value down" title="${esc(exact(s.excessTotal))}">${bdt(s.excessTotal)}</span>
+        <span class="sub"><span><i class="cw-key c"></i>Consumable ${bdt(s.excessConsumable)}</span><span><i class="cw-key w"></i>Wastage ${bdt(s.excessWastage)}</span></span>
+        <div class="cw-split" role="img" aria-label="Consumable ${shares[0].toFixed(1)}%, wastage ${shares[1].toFixed(1)}% of the amount above target">${shares[0] ? `<span class="c" style="flex-grow:${shares[0]}"></span>` : ""}${shares[1] ? `<span class="w" style="flex-grow:${shares[1]}"></span>` : ""}</div>
+        <span class="foot"><span>${int(s.aboveAny)} outlets above at least one target</span><span>${p ? cwValDelta(s.excessTotal, p.excessTotal) : `${int(s.outlets - s.mapped)} unmapped`}</span></span></div>
+    </div>`;
+  }
+  const cwOutletAttr = (x) => `data-cwoutlet="${esc(x.code)}" tabindex="0"`;
+  // Group table used by the overview comparison and the league tables. Clicking a group lists its outlets.
+  function cwGroupTable(id, v, dim, metric, extraTools, title) {
+    const def = CWM[metric], gd = gdrill(id, dim);
+    const rows = gd ? cwGroups(v.metrics.filter((r) => (r[dim] || "Unmapped") === gd.key), "outlet") : cwGroups(v.metrics, dim);
+    const lvl = gd ? "outlet" : dim;
+    rows.forEach((x) => { x.metric = x[metric]; x.target = x.targets[metric]; x.variance = isNum(x.metric) && isNum(x.target) ? x.metric - x.target : null; x.base = x[def.den]; x.value = x[def.num]; });
+    return mountTable(id, {
+      title: gd ? `Outlets of ${gd.key}` : title, file: `cw_${id}_${lvl}_${metric}`, stamp: S.cwv.to, banner: gBanner(id, gd),
+      desc: (n) => `${int(n)} rows. ${def.label}, weighted; lower is better. ${lvl === "outlet" ? "Click an outlet for its profile." : "Click a row to list its outlets."}`,
+      rows, key: (x) => x.key, searchText: (x) => `${x.name} ${x.sub}`, defaultSort: "metric", tools: extraTools, pageSize: 25,
+      rowAttr: (x) => (x.code ? cwOutletAttr(x) : `data-gpick="${id}" data-glevel="${esc(dim)}" data-gkey="${esc(x.key)}" tabindex="0" title="List ${esc(x.name)}'s outlets"`),
+      cols: [
+        { k: "name", label: CW_LEVELS[lvl], fmt: (x) => `<span class="cell-primary">${esc(x.name)}</span><span class="cell-secondary">${esc(x.sub)}</span>`, csv: (x) => x.name, val: (x) => x.name },
+        { k: "outlets", label: "Outlets", num: 1, fmt: (x) => int(x.outlets) },
+        { k: "base", label: "Sales base", num: 1, fmt: (x) => bdt(x.base), csv: (x) => Math.round(x.base) },
+        { k: "value", label: def.valueLabel, num: 1, fmt: (x) => bdt(x.value), csv: (x) => Math.round(x.value) },
+        { k: "target", label: "Target", num: 1, fmt: (x) => cwPct(x.target), csv: (x) => csv4(x.target) },
+        { k: "metric", label: "Weighted actual", num: 1, fmt: (x) => `<strong>${cwPct(x.metric)}</strong>`, csv: (x) => csv4(x.metric) },
+        { k: "variance", label: "Variance", num: 1, fmt: (x) => `<span class="${x.variance > 0 ? "down" : "up"}">${pts(x.variance)}</span>`, csv: (x) => csv4(x.variance) },
+        { k: "excessTotal", label: "Amount above target", num: 1, fmt: (x) => bdt(x.excessTotal), csv: (x) => Math.round(x.excessTotal) },
+        { k: "st", label: "Status", val: (x) => cwStatus(x.metric, x.target, x.value).label, fmt: (x) => chip(cwStatus(x.metric, x.target, x.value)), csv: (x) => cwStatus(x.metric, x.target, x.value).label },
+      ],
+    });
+  }
+
+  // ---- overview
+  function pageCW() {
+    const g = cwGuard(); if (g) return g;
+    const v = cwView(), f = S.cwv;
+    const counts = { good: 0, near: 0, bad: 0, neutral: 0 };
+    v.metrics.forEach((r) => { const k = r.statuses[f.statusMetric].key; counts[k === "info" ? "good" : k]++; });
+    const tot = Math.max(1, counts.good + counts.near + counts.bad + counts.neutral), a = (counts.good / tot) * 100, b = a + (counts.near / tot) * 100, c = b + (counts.bad / tot) * 100;
+    const donut = `<section class="panel"><div class="panel-head"><div><h2>Target position</h2><p>Outlets within, at and above target.</p></div><div class="panel-tools">${cwSel("statusMetric", CW_METRIC_OPTS, "Status metric")}</div></div>
+      <div class="panel-body cw-donut"><div class="donut" style="background:conic-gradient(var(--good) 0 ${a}%, var(--warn) ${a}% ${b}%, var(--bad) ${b}% ${c}%, var(--surface-3) ${c}% 100%)"><div class="donut-center"><strong>${int(counts.good + counts.near + counts.bad)}</strong><span>comparable</span></div></div>
+      <div class="cw-legend"><div><strong class="up">${int(counts.good)}</strong><span>Within</span></div><div><strong style="color:var(--warn)">${int(counts.near)}</strong><span>At target</span></div><div><strong class="down">${int(counts.bad)}</strong><span>Above</span></div><div><strong>${int(counts.neutral)}</strong><span>No target</span></div></div></div></section>`;
+    const trend = `<section class="panel"><div class="panel-head"><div><h2>Rate trend</h2><p id="cwTrendSub"></p></div><div class="panel-tools">${cwSel("basis", [["daily", "Daily"], ["rolling7", "7-day rolling"], ["cumulative", "Period to date"]], "Basis")}</div></div>
+      <div class="panel-body"><div class="chart-legend"><span><i class="swatch" style="background:var(--series-1)"></i>Consumable %</span><span><i class="swatch" style="background:var(--series-2)"></i>Wastage on PNP %</span><span><i class="swatch dash"></i>Targets</span>${v.prior ? '<span><i class="swatch dash"></i>Prior period (dashed, thin)</span>' : ""}</div>
+      <div class="chart" id="cwTrend"></div><p class="note" id="cwTrendNote" hidden></p></div></section>`;
+    let movers = "";
+    if (v.prior) {
+      const k = f.moversMetric, moved = v.metrics.filter((r) => r.prior && isNum(r[k]) && isNum(r.prior[k])).map((r) => ({ r, ch: r[k] - r.prior[k] })).filter((x) => Math.abs(x.ch) > CW_TOL);
+      const list = (items, cls) => items.map(({ r, ch }) => `<div class="cw-row" ${cwOutletAttr(r)}><div><strong>${esc(r.code)} · ${esc(r.name)}</strong><small>${cwPct(r.prior[k])} → ${cwPct(r[k])}</small></div><span class="${cls}">${ch > 0 ? "▲" : "▼"} ${pts(Math.abs(ch)).replace("+", "")}</span></div>`).join("") || '<p class="net-empty">No material movement.</p>';
+      movers = `<section class="panel"><div class="panel-head"><div><h2>Biggest movers</h2><p>${esc(CWM[k].label)} against ${fdate(v.prior.from)} to ${fdate(v.prior.to)}.</p></div><div class="panel-tools">${cwSel("moversMetric", CW_METRIC_OPTS, "Movers metric")}</div></div>
+        <div class="panel-body grid-h"><div><h3 class="cw-h3">Worsened</h3>${list([...moved].sort((x, y) => y.ch - x.ch).slice(0, 6), "down")}</div><div><h3 class="cw-h3">Improved</h3>${list([...moved].sort((x, y) => x.ch - y.ch).slice(0, 6), "up")}</div></div></section>`;
+    }
+    const rank = cwGroupTable("cw-rank", v, f.rankDim, f.rankMetric, `${cwSel("rankDim", [["zone", "Zonal"], ["regionalLeader", "Regional leader"], ["division", "Division"], ["district", "District"], ["outlet", "Outlet"]], "Level")}${cwSel("rankMetric", CW_METRIC_OPTS, "Metric")}`, "Hierarchy comparison");
+    AFTER.push(() => cwTrend(v));
+    const defs = S.cw.metricDefinitions || {};
+    return `${cwBar(v)}${cwKpis(v)}<div class="grid-2">${trend}${donut}</div>${rank}${movers}
+      <details class="panel cw-method"><summary>How these numbers are worked out</summary><div class="panel-body"><dl class="facts">
+        ${[["PNP sales", defs.pnpSales], ["Consumable % on sales", defs.consumableRate], ["Consumable sales base", defs.consumableWindow], ["Wastage % on sales", defs.wastageSalesRate], ["Wastage % on PNP sales", defs.wastagePnpRate], ["SAP net value", defs.sapNetValue], ["Group results", defs.aggregateRate], ["Benchmark outlet average", defs.outletAverage],
+          ["Amount above target", "For each metric an outlet is above target: (actual − target) × that metric's sales base. Consumable and wastage are added; the two wastage measures describe the same taka, so only the larger counts."],
+          ["Period comparison", "The equal-length window just before the selected range, shown only when it falls inside the loaded data."]]
+          .filter(([, t]) => t).map(([h, t]) => `<dt>${esc(h)}</dt><dd>${esc(t)}</dd>`).join("")}</dl></div></details>`;
+  }
+  // SAP consumable issues post in batches, so the daily consumable line swings on posting timing.
+  // Smoothing is a ratio of sums over the window, never an average of daily percentages.
+  function cwSmooth(rows, mode) {
+    if (mode === "daily" || !rows.length) return rows;
+    return rows.map((row, i) => {
+      const t = cwEmpty();
+      rows.slice(mode === "cumulative" ? 0 : Math.max(0, i - 6), i + 1).forEach((x) => cwAdd(t, x));
+      const o = { date: row.date, ...t };
+      CWK.forEach((k) => (o[k] = ratio(t[CWM[k].num], t[CWM[k].den])));
+      return o;
+    });
+  }
+  function cwTrend(v) {
+    const host = $("#cwTrend");
+    if (!host) return;
+    if (!v.daily.length || !v.summary.sales) { host.innerHTML = '<p class="net-empty">No daily data for the selected scope.</p>'; return; }
+    const mode = S.cwv.basis, W = Math.round(Math.max(300, Math.min(1200, host.clientWidth || 800))), narrow = W < 520;
+    const H = Math.round(Math.max(200, Math.min(320, W * (narrow ? 0.62 : 0.34)))), m = { t: 14, r: narrow ? 12 : 20, b: 32, l: narrow ? 44 : 54 };
+    const pw = W - m.l - m.r, ph = H - m.t - m.b;
+    const ser = [["consumableRate", "--series-1"], ["wastagePnpRate", "--series-2"]];
+    const cur = cwSmooth(v.daily, mode), pri = v.prior ? cwSmooth(v.prior.daily, mode) : [];
+    const vals = [...cur, ...pri].flatMap((x) => ser.map(([k]) => x[k])).concat(ser.map(([k]) => v.summary.targets[k])).filter(isNum);
+    const max = Math.max(0.001, ...vals) * 1.18, n = Math.max(cur.length, pri.length);
+    const X = (i) => m.l + (n === 1 ? pw / 2 : (i / (n - 1)) * pw), Y = (x) => m.t + ph - (Math.max(0, x || 0) / max) * ph;
+    const path = (rows, k) => rows.map((x, i) => (isNum(x[k]) ? [X(i), Y(x[k])] : null)).filter(Boolean).map(([x, y], i) => `${i ? "L" : "M"}${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
+    const ticks = Math.max(2, Math.min(4, Math.floor(ph / 28)));
+    let svg = "";
+    for (let i = 0; i <= ticks; i++) { const val = (max / ticks) * i, y = Y(val); svg += `<line x1="${m.l}" x2="${W - m.r}" y1="${y}" y2="${y}" style="stroke:var(--grid)"/><text x="${m.l - 8}" y="${y + 3.5}" text-anchor="end" class="cw-axis">${pct(val, 1)}</text>`; }
+    const step = Math.max(1, Math.ceil(cur.length / (narrow ? 4 : 9)));
+    cur.forEach((x, i) => { const last = i === cur.length - 1; if (i && !last && i % step) return; svg += `<text x="${i === 0 ? m.l : last ? W - m.r : X(i)}" y="${H - 10}" text-anchor="${i === 0 ? "start" : last ? "end" : "middle"}" class="cw-axis">${fdate(x.date, true)}</text>`; });
+    ser.forEach(([k, c]) => { const t = v.summary.targets[k]; if (isNum(t)) svg += `<line x1="${m.l}" x2="${W - m.r}" y1="${Y(t)}" y2="${Y(t)}" style="stroke:var(${c})" stroke-dasharray="6 5" opacity=".7"><title>Target ${cwPct(t)}</title></line>`; });
+    if (pri.length) ser.forEach(([k, c]) => { const d = path(pri, k); if (d) svg += `<path d="${d}" fill="none" style="stroke:var(${c})" stroke-width="1.4" stroke-dasharray="3 4" opacity=".7"/>`; });
+    ser.forEach(([k, c]) => {
+      const d = path(cur, k);
+      if (d) svg += `<path d="${d}" fill="none" style="stroke:var(${c})" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"/>`;
+      cur.forEach((x, i) => { if (isNum(x[k])) svg += `<circle cx="${X(i).toFixed(1)}" cy="${Y(x[k]).toFixed(1)}" r="3.2" style="fill:var(${c})"><title>${fdate(x.date)} · ${CWM[k].short} ${cwPct(x[k])}</title></circle>`; });
+    });
+    host.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" role="img" aria-label="Consumable and wastage rate trend">${svg}</svg>`;
+    const label = mode === "rolling7" ? "7-day rolling" : mode === "cumulative" ? "period to date" : "daily";
+    $("#cwTrendSub").textContent = v.prior ? `${label}. Solid ${fdate(v.from)} to ${fdate(v.to)}, dashed ${fdate(v.prior.from)} to ${fdate(v.prior.to)}.` : `Consumable on sales up to each outlet's last posting day; wastage on PNP sales. ${label}.`;
+    // Flag a consumable line whose value lands on only a few days of the window.
+    const cons = v.daily.map((x) => Math.max(0, x.consumable)), total = cons.reduce((s, x) => s + x, 0), quiet = cons.filter((x) => x < total * 0.02).length;
+    const note = $("#cwTrendNote");
+    if (mode === "daily" && total > 0 && v.daily.length >= 4 && quiet >= Math.max(2, Math.round(v.daily.length * 0.2))) {
+      note.hidden = false;
+      note.textContent = `Consumable issues post in batches: ${quiet} of ${v.daily.length} days in this range carry almost no consumable value, so the daily consumable line swings on posting timing. Switch the basis to 7-day rolling or period to date to read the trend. Wastage posts daily and is unaffected.`;
+    }
+  }
+
+  // ---- league tables
+  function pageCWL() {
+    const g = cwGuard(); if (g) return g;
+    const v = cwView(), f = S.cwv;
+    return `${cwBar(v)}${cwGroupTable("cw-league", v, f.leagueDim, f.leagueMetric, `${cwSel("leagueDim", [["zone", "Zonal"], ["regionalLeader", "Regional leader"], ["division", "Division"], ["district", "District"], ["criteria", "Final criteria"]], "Level")}${cwSel("leagueMetric", CW_METRIC_OPTS, "Metric")}`, "League table")}`;
+  }
+
+  // ---- exceptions
+  function cwExceptions(v) {
+    const k = S.cwv.excMetric;
+    return v.metrics.map((r) => {
+      if (k === "all") { const worst = CWK.filter((m) => r.excess[m] > 0).sort((a, b) => r.excess[b] - r.excess[a])[0]; return { r, value: r.excessTotal, k: worst || null }; }
+      return { r, value: r.excess[k], k };
+    }).filter((x) => x.value > 0 && x.k).sort((a, b) => b.value - a.value);
+  }
+  function pageCWX() {
+    const g = cwGuard(); if (g) return g;
+    const v = cwView(), items = cwExceptions(v);
+    const cons = v.metrics.reduce((s, r) => s + r.excess.consumableRate, 0), wast = v.metrics.reduce((s, r) => s + Math.max(r.excess.wastageSalesRate, r.excess.wastagePnpRate), 0);
+    NCSV.cwx = () => ["cw_exception_worklist", ["Priority", "Outlet code", "Outlet name", "Regional leader", "Zonal", "District", "Final criteria", "Driver metric", "Actual %", "Target %", "Variance pp", "Amount above target", "Period from", "Period to"],
+      items.map(({ r, value, k }, i) => [i + 1, r.code, r.name, r.regionalLeader, r.zone, r.district, r.criteria, CWM[k].label, csv4(r[k]), csv4(r[CWM[k].target]), isNum(r[k]) && isNum(r[CWM[k].target]) ? ((r[k] - r[CWM[k].target]) * 100).toFixed(4) : "", Math.round(value), v.from, v.to]), v.to];
+    return `${cwBar(v)}<div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(210px,1fr))">
+      ${kpi({ label: "Amount above target", value: `<span class="down">${bdt(items.reduce((s, x) => s + x.value, 0))}</span>`, sub: `Across <strong>${int(items.length)}</strong> outlets in the selection`, accent: "var(--bad)" })}
+      ${kpi({ label: "Consumable exposure", value: bdt(cons), sub: "Spend above the consumable target", foot: `<span>${int(v.metrics.filter((r) => r.excess.consumableRate > 0).length)} outlets</span>`, accent: "var(--series-1)" })}
+      ${kpi({ label: "Wastage exposure", value: bdt(wast), sub: "Higher of the sales and PNP wastage gaps", foot: `<span>${int(v.metrics.filter((r) => Math.max(r.excess.wastageSalesRate, r.excess.wastagePnpRate) > 0).length)} outlets</span>`, accent: "var(--series-3)" })}</div>
+      <section class="panel"><div class="panel-head"><div><h2>Ranked by value at stake</h2><p>Taka above target, largest first. Top 100 shown; the worklist CSV has every outlet. Click an outlet for its profile.</p></div>
+        <div class="panel-tools">${cwSel("excMetric", [["all", "All metrics combined"], ...CW_METRIC_OPTS], "Metric")}${csvBtn("cwx")}</div></div>
+      <div class="panel-body cw-list">${items.slice(0, 100).map(({ r, value, k }, i) => `<div class="cw-row" ${cwOutletAttr(r)}><span class="cw-rank">${i + 1}</span>
+        <div><strong>${esc(r.code)} · ${esc(r.name)}</strong><small>${esc(r.zone)} · ${esc(r.regionalLeader)} · ${esc(CWM[k].short)} ${cwPct(r[k])} vs target ${cwPct(r[CWM[k].target])} (${pts(r[k] - r[CWM[k].target])})</small></div>
+        <span class="cw-amt"><strong class="down">${bdt(value)}</strong><small>over target</small></span></div>`).join("") || '<p class="net-empty">No outlet in this selection is above its applicable target.</p>'}</div></section>`;
+  }
+
+  // ---- benchmarks
+  function pageCWB() {
+    const g = cwGuard(); if (g) return g;
+    const v = cwView(), k = S.cwv.benchMetric, def = CWM[k];
+    const rows = cwGroups(v.metrics, "criteria").map((x) => ({ ...x, target: x.targets[k], actual: x[k], avg: x.averages[k], base: x[def.den], gap: isNum(x.averages[k]) && isNum(x.targets[k]) ? x.averages[k] - x.targets[k] : null }));
+    const table = mountTable("cw-bench", {
+      title: "Target versus benchmark outlet average", file: `cw_benchmarks_${k}`, stamp: S.cwv.to,
+      desc: (n) => `${int(n)} final criteria. Weighted actual is sum ÷ sum; outlet average is the simple average of outlet rates. Click a row to list its outlets in the register.`,
+      rows, key: (x) => x.key, searchText: (x) => x.name, defaultSort: "name", defaultDir: "asc", tools: cwSel("benchMetric", CWK.map((x) => [x, CWM[x].label]), "Metric"),
+      rowAttr: (x) => `data-cwcrit="${esc(x.key)}" tabindex="0" title="List ${esc(x.name)} outlets"`,
+      cols: [
+        { k: "name", label: "Final criteria", fmt: (x) => `<span class="cell-primary">${esc(x.name)}</span>`, csv: (x) => x.name, val: (x) => x.name },
+        { k: "outlets", label: "Outlets", num: 1, fmt: (x) => int(x.outlets) },
+        { k: "base", label: "Sales base", num: 1, fmt: (x) => bdt(x.base), csv: (x) => Math.round(x.base) },
+        { k: "target", label: "Target", num: 1, fmt: (x) => `<strong>${cwPct(x.target)}</strong>`, csv: (x) => csv4(x.target) },
+        { k: "actual", label: "Weighted actual", num: 1, fmt: (x) => `<span class="rate-pair"><strong>${cwPct(x.actual)}</strong>${chip(cwStatus(x.actual, x.target, x[def.num]))}</span>`, csv: (x) => csv4(x.actual) },
+        { k: "avg", label: "Outlet average", num: 1, fmt: (x) => `<strong>${cwPct(x.avg)}</strong>`, csv: (x) => csv4(x.avg) },
+        { k: "gap", label: "Average vs target", num: 1, fmt: (x) => pts(x.gap), csv: (x) => csv4(x.gap) },
+        { k: "hl", label: "Highlight", val: (x) => cwAvgVs(x.avg, x.target).label, fmt: (x) => chip(cwAvgVs(x.avg, x.target)), csv: (x) => cwAvgVs(x.avg, x.target).label },
+      ],
+    });
+    const s = v.summary;
+    return `${cwBar(v)}${table}<div class="grid-h">${CWK.map((x) => `<section class="panel"><div class="panel-body"><span class="muted" style="font-size:11.5px">Selected scope</span><h2 style="font-size:15px;margin:2px 0 10px">${esc(CWM[x].label)}</h2>
+      <div class="stat-grid three"><div class="stat"><small>Weighted target</small><strong>${cwPct(s.targets[x])}</strong></div><div class="stat"><small>Weighted actual</small><strong>${cwPct(s[x])}</strong></div><div class="stat"><small>Outlet average</small><strong>${cwPct(s.averages[x])}</strong></div></div>
+      <div style="margin-top:10px">${chip(cwAvgVs(s.averages[x], s.targets[x]))}</div></div></section>`).join("")}</div>`;
+  }
+
+  // ---- materials
+  function cwMaterials(codes, from, to, limit) {
+    const out = { consumable: [], wastage: [] };
+    if (!codes.size || from > to) return out;
+    Object.keys(out).forEach((kind) => {
+      const t = new Map();
+      for (const [date, code, id, value, qty] of S.cw.materialDaily[kind]) {
+        if (!codes.has(code) || date < from || date > to) continue;
+        const x = t.get(id) || [id, 0, 0]; x[1] += value; x[2] += qty; t.set(id, x);
+      }
+      // Reversals are netted before ranking; never sum per-outlet top lists.
+      out[kind] = [...t.values()].filter((x) => x[1] > 0).sort((a, b) => b[1] - a[1] || a[0] - b[0]).slice(0, limit || Infinity);
+    });
+    return out;
+  }
+  function cwMatRows(rows, accent) {
+    if (!rows.length) return '<p class="net-empty">No items with positive net value for the selected outlets and dates.</p>';
+    const cat = S.cw.materialCatalog || [], max = Math.max(...rows.map((x) => x[1]), 1);
+    return rows.map(([id, value, qty]) => {
+      const e = cat[id] || ["", "Unknown material", ""];
+      return `<div class="cw-mat"><div><strong title="${esc(e[1])}">${esc(e[1])}</strong><small>${esc(e[0])}${qty ? ` · ${esc(Number(qty.toFixed(2)).toLocaleString("en-US"))} ${esc(e[2] || "")}` : ""}</small></div>
+        <span>${bdt(value)}</span><div class="bar"><i style="width:${Math.max(2, (value / max) * 100).toFixed(1)}%;background:${accent}"></i></div></div>`;
+    }).join("");
+  }
+  function pageCWM() {
+    const g = cwGuard(); if (g) return g;
+    const v = cwView(), all = cwMaterials(v.codes, v.from, v.to), cat = S.cw.materialCatalog || [];
+    NCSV.cwm = () => ["cw_materials", ["Kind", "Rank", "Material", "Description", "Unit", "Net value", "Net quantity", "Period from", "Period to"],
+      ["wastage", "consumable"].flatMap((kind) => all[kind].map(([id, value, qty], i) => [kind, i + 1, (cat[id] || [])[0] || "", (cat[id] || [])[1] || "", (cat[id] || [])[2] || "", Math.round(value * 100) / 100, Math.round(qty * 100) / 100, v.from, v.to])), v.to];
+    const panel = (title, kind, accent) => `<section class="panel"><div class="panel-head"><div><h2>${title}</h2><p>Top 25 of ${int(all[kind].length)} items by net value (issues less reversals) for the outlets and dates in view.</p></div></div><div class="panel-body cw-list">${cwMatRows(all[kind].slice(0, 25), accent)}</div></section>`;
+    return `${cwBar(v)}<section class="panel"><div class="panel-head"><div><h2>Where the value goes</h2><p>Follows every filter and the selected dates. The CSV has every item, not just the top 25.</p></div><div class="panel-tools">${csvBtn("cwm")}</div></div></section>
+      <div class="grid-h">${panel("Top wasted items", "wastage", "var(--series-3)")}${panel("Top consumable items", "consumable", "var(--series-1)")}</div>`;
+  }
+
+  // ---- outlet register
+  function pageCWO() {
+    const g = cwGuard(); if (g) return g;
+    const v = cwView();
+    const rate = (k) => ({ k, label: CWM[k].short, num: 1, fmt: (r) => `<span class="rate-pair"><strong>${cwPct(r[k])}</strong>${chip(r.statuses[k])}</span><span class="cell-secondary">Target ${cwPct(r[CWM[k].target])}</span>`, csv: (r) => csv4(r[k]) });
+    const money = (k, label) => ({ k, label, num: 1, fmt: (r) => exact(r[k]), csv: (r) => Math.round((r[k] || 0) * 100) / 100 });
+    const txt = (k, label) => ({ k, label, fmt: (r) => esc(r[k] || "—"), csv: (r) => r[k] || "" });
+    const shown = [
+      { k: "code", label: "Outlet", val: (r) => r.code, fmt: (r) => `<span class="cell-primary">${esc(r.code)}</span><span class="cell-secondary">${esc(r.name)}</span>`, csv: (r) => r.code },
+      txt("regionalLeader", "Regional leader"), txt("zone", "Zonal"), txt("division", "Division"), txt("district", "District"), txt("criteria", "Final criteria"),
+      money("sales", "Overall sales"), money("pnpSales", "PNP sales"), money("consumable", "Consumable"), rate("consumableRate"), money("wastage", "Wastage"), rate("wastageSalesRate"), rate("wastagePnpRate"),
+      { k: "excessTotal", label: "Amount above target", num: 1, fmt: (r) => (r.excessTotal > 0 ? `<span class="down">${bdt(r.excessTotal)}</span>` : '<span class="muted">—</span>'), csv: (r) => Math.round(r.excessTotal) },
+    ];
+    const csvCols = [shown[0], { k: "name", label: "Outlet name", csv: (r) => r.name }, ...shown.slice(1, 6), txt("format", "Format"), txt("pnpStatus", "PNP status"), txt("ownership", "Ownership"),
+      money("sales", "Overall sales"), money("pnpSales", "PNP sales (FRESH PRODUCE)"), money("consumable", "Consumable value"), money("consumableSales", "Consumable sales base"),
+      { k: "consumableCutoff", label: "Consumable cut-off", csv: (r) => r.consumableCutoff || "" }, { k: "consumableRate", label: "Consumable %", csv: (r) => csv4(r.consumableRate) }, { k: "consumableTarget", label: "Consumable target %", csv: (r) => csv4(r.consumableTarget) },
+      money("wastage", "Wastage value"), { k: "wastageSalesRate", label: "Wastage % on sales", csv: (r) => csv4(r.wastageSalesRate) }, { k: "wastageSalesTarget", label: "Wastage sales target %", csv: (r) => csv4(r.wastageSalesTarget) },
+      { k: "wastagePnpRate", label: "Wastage % on PNP sales", csv: (r) => csv4(r.wastagePnpRate) }, { k: "wastagePnpTarget", label: "Wastage PNP target %", csv: (r) => csv4(r.wastagePnpTarget) },
+      { k: "excessTotal", label: "Amount above target", csv: (r) => Math.round(r.excessTotal) }, { k: "pf", label: "Period from", csv: () => v.from }, { k: "pt", label: "Period to", csv: () => v.to }];
+    const crit = S.cwCrit && v.metrics.some((r) => r.criteria === S.cwCrit) ? S.cwCrit : null;
+    return `${cwBar(v)}${mountTable("cw-reg", {
+      title: "Outlet performance register", file: "cw_outlets", stamp: S.cwv.to,
+      banner: crit ? `<div class="drill-banner">Showing <strong>Final criteria: ${esc(crit)}</strong> within the sidebar filters. <button type="button" data-cwcrit-clear>Show all outlets</button></div>` : "",
+      desc: (n) => `${int(n)} outlets after filters and search. Click a row for the outlet profile. The CSV carries every column.`,
+      rows: crit ? v.metrics.filter((r) => r.criteria === crit) : v.metrics, key: (r) => r.code, defaultSort: "wastagePnpRate",
+      searchText: (r) => `${r.code} ${r.name} ${r.zone} ${r.regionalLeader} ${r.division} ${r.district} ${r.criteria}`, rowAttr: cwOutletAttr, cols: shown, csvCols,
+    })}`;
+  }
+
+  // ---- outlet profile
+  function openCwOutlet(code) {
+    const v = cwView(), r = v.metrics.find((x) => x.code === code);
+    if (!r) return;
+    S.lastFocus = document.activeElement;
+    const series = S.cw.daily.filter((x) => x.code === code && x.date >= v.from && x.date <= v.to).sort((a, b) => a.date.localeCompare(b.date));
+    const peers = v.metrics.filter((x) => x.criteria === r.criteria), zonePeers = v.metrics.filter((x) => x.zone === r.zone), ps = cwSummarize(peers);
+    const rank = (k, pool) => { const s = pool.filter((x) => isNum(x[k])).sort((a, b) => b[k] - a[k]), i = s.findIndex((x) => x.code === code); return i < 0 ? "—" : `${i + 1} of ${s.length}`; };
+    const spark = (k, c) => {
+      const p = series.map((x) => ratio(x[CWM[k].num], x[CWM[k].den])), ok = p.filter(isNum);
+      if (ok.length < 2) return '<p class="net-empty" style="padding:10px">Not enough days to chart.</p>';
+      const max = Math.max(...ok) * 1.15 || 0.001, step = 480 / Math.max(1, p.length - 1);
+      let started = false;
+      const d = p.map((x, i) => { if (!isNum(x)) return ""; const cmd = started ? "L" : "M"; started = true; return `${cmd}${(i * step).toFixed(1)},${(96 - (x / max) * 96).toFixed(1)}`; }).filter(Boolean).join(" ");
+      return `<svg viewBox="0 0 480 96" style="width:100%;height:96px" role="img" aria-label="${esc(CWM[k].label)} by day"><path d="${d}" fill="none" style="stroke:var(${c})" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
+    };
+    const span = dayCount(v.from, v.to), covered = r.consumableCutoff ? dayCount(v.from, r.consumableCutoff) : 0, missed = Math.max(0, span - covered);
+    const mats = cwMaterials(new Set([code]), v.from, v.to, 6);
+    $("#drawerTitle").textContent = `${r.code} · ${r.name}`;
+    $("#drawerBody").innerHTML = `
+      <p class="muted" style="margin:0">${esc([r.criteria, r.zone, r.regionalLeader, [r.district, r.division].filter(Boolean).join(", ")].filter(Boolean).join(" · "))}</p>
+      <div class="stat-grid">
+        <div class="stat"><small>Overall sales</small><strong>${bdt(r.sales)}</strong><div style="font-size:12px">PNP ${bdt(r.pnpSales)}</div></div>
+        <div class="stat"><small>Consumable</small><strong>${bdt(r.consumable)}</strong><div style="font-size:12px">${r.consumableCutoff ? `Base ${bdt(r.consumableSales)} to ${fdate(r.consumableCutoff)}` : "Nothing posted in this period · no rate"}</div></div>
+        <div class="stat"><small>Wastage</small><strong>${bdt(r.wastage)}</strong></div>
+        <div class="stat"><small>Amount above target</small><strong class="${r.excessTotal > 0 ? "down" : "up"}">${r.excessTotal > 0 ? bdt(r.excessTotal) : "None"}</strong></div>
+      </div>
+      <div class="cw-window"><div class="hero-row"><dt>Consumable posting window</dt><dd>${covered} of ${span} days</dd></div>
+        <div class="meter${covered ? "" : " cw-empty"}"><i class="good" style="width:${span ? Math.min(100, (covered / span) * 100).toFixed(1) : 0}%"></i></div>
+        <div class="meter-scale"><span>${fdate(v.from)}</span><span>${fdate(v.to)}</span></div>
+        <p class="muted" style="margin:6px 0 0;font-size:12px">${r.consumableCutoff ? `Sales counted to <strong>${fdate(r.consumableCutoff)}</strong>, this outlet's last consumable posting.${missed ? ` The last ${missed} day${missed === 1 ? "" : "s"} of sales are held out of the rate because nothing was posted against them.` : " Postings run to the end of the period."}` : "No consumable was posted in this period, so this outlet has no consumable rate. It is left out of the weighted result rather than counted as zero."}</p></div>
+      <div><div class="section-title">Against target</div><div class="stat-grid three">${CWK.map((k) => { const t = r[CWM[k].target], st = r.statuses[k]; return `<div class="stat"><small>${esc(CWM[k].short)}</small><strong class="${st.key === "bad" ? "down" : st.key === "good" ? "up" : ""}">${cwPct(r[k])}</strong><div style="font-size:12px">Target ${cwPct(t)}${isNum(r[k]) && isNum(t) ? ` · ${pts(r[k] - t)}` : ""}${r.prior && isNum(r.prior[k]) ? `<br>${cwDelta(r[k], r.prior[k])} vs prior` : ""}</div></div>`; }).join("")}</div></div>
+      <div><div class="section-title">Consumable % by day</div>${spark("consumableRate", "--series-1")}<div class="section-title" style="margin-top:10px">Wastage on PNP % by day</div>${spark("wastagePnpRate", "--series-2")}</div>
+      <div><div class="section-title">Rank, worst first</div><table class="compact"><thead><tr><th>Metric</th><th class="num">Selection</th><th class="num">Zonal</th><th class="num">Criteria peers</th></tr></thead><tbody>
+        ${CWK.map((k) => `<tr><td>${esc(CWM[k].short)}</td><td class="num">${rank(k, v.metrics)}</td><td class="num">${rank(k, zonePeers)}</td><td class="num">${rank(k, peers)}</td></tr>`).join("")}</tbody></table></div>
+      <div><div class="section-title">Versus ${esc(r.criteria)} peers (${int(peers.length)} outlets)</div><table class="compact"><tbody>
+        ${CWK.map((k) => `<tr><td>${esc(CWM[k].short)}</td><td class="num"><strong>${cwPct(r[k])}</strong></td><td class="num muted">peer group ${cwPct(ps[k])}</td><td class="num">${pts(isNum(r[k]) && isNum(ps[k]) ? r[k] - ps[k] : null)}</td></tr>`).join("")}</tbody></table></div>
+      <div><div class="section-title">Top wasted items (selected period)</div><div class="cw-list">${cwMatRows(mats.wastage, "var(--series-3)")}</div></div>
+      <div><div class="section-title">Top consumable items (selected period)</div><div class="cw-list">${cwMatRows(mats.consumable, "var(--series-1)")}</div></div>`;
+    showDrawer();
+  }
+
+  // ---- raw rows: the source rows behind the pages, for the outlets and dates in view
+  function cwRaw(kind) {
+    const v = cwView(), d = S.cw, o = (c) => d.byCode.get(c) || {};
+    if (kind === "daily") {
+      const rows = d.daily.filter((r) => v.codes.has(r.code) && r.date >= v.from && r.date <= v.to).sort((a, b) => a.date.localeCompare(b.date) || a.code.localeCompare(b.code));
+      saveCsv(`cw_raw_outlet_days_${v.from}_to`, ["Date", "Outlet code", "Outlet name", "Regional leader", "Zonal", "Division", "District", "Final criteria", "POS NSI", "PNP sales (FRESH PRODUCE)", "Consumable value", "Consumable sales base", "Wastage value"],
+        rows.map((r) => { const x = o(r.code); return [r.date, r.code, x.name, x.regionalLeader, x.zone, x.division, x.district, x.criteria, r.sales, r.pnpSales, r.consumable, r.consumableSales, r.wastage]; }), v.to);
+    } else {
+      const cat = d.materialCatalog || [], rows = [];
+      ["consumable", "wastage"].forEach((k) => d.materialDaily[k].forEach(([date, code, id, value, qty]) => {
+        if (!v.codes.has(code) || date < v.from || date > v.to) return;
+        const x = o(code), m = cat[id] || [];
+        rows.push([date, k === "consumable" ? "Consumable" : "Wastage", code, x.name, x.regionalLeader, x.zone, m[0] || "", m[1] || "", m[2] || "", value, qty]);
+      }));
+      rows.sort((a, b) => a[0].localeCompare(b[0]) || a[2].localeCompare(b[2]));
+      saveCsv(`cw_raw_material_postings_${v.from}_to`, ["Posting date", "Kind", "Outlet code", "Outlet name", "Regional leader", "Zonal", "Material", "Description", "Unit", "Net value", "Net quantity"], rows, v.to);
+    }
+  }
+
+  // ---- data quality (shown on the Data quality page)
+  function cwQualityPanel() {
+    const head = `<div class="panel-head"><div><h2>Consumable and wastage files</h2><p>From the Consumable & Wastage Control Drive folder. Files are picked by name: Target*.txt, Sales-Till*.xlsx, Zone Distribution*.xlsx, CONSUMABLE*, WASTAGE*.</p></div></div>`;
+    if (!S.cw) { loadCw(); return `<section class="panel">${head}<div class="panel-body"><p class="muted" style="margin:0">${S.cwErr ? `cw.json could not be loaded (${esc(S.cwErr)}).` : "Loading…"}</p></div></section>`; }
+    const q = S.cw.dataQuality, w = q.consumableWindow || {}, un = q.unmappedActiveOutlets || [], rc = q.sales?.reconciliation || {}, al = q.periodAlignment || {};
+    const rev = [...new Set([...(q.negativeNetConsumableOutlets || []), ...(q.negativeNetWastageOutlets || [])])], dup = q.zone?.duplicateCodes || [];
+    const item = (lvl, title, body) => `<div class="issue"><span>${chip({ cls: lvl, label: lvl === "good" ? "Passed" : lvl === "bad" ? "Problem" : lvl === "warn" ? "Warning" : "Note" })}</span><div>${esc(title)}<small>${body}</small></div></div>`;
+    return `<section class="panel">${head}<div class="table-wrap"><table><thead><tr><th>File</th><th>Type</th><th class="num">Rows</th><th>Covers</th></tr></thead><tbody>
+      ${S.cw.sourceFiles.map((s) => `<tr><td class="cell-primary">${esc(s.name)}</td><td>${esc(s.id)}</td><td class="num">${int(s.rows)}</td><td>${s.dateMin ? `${fdate(s.dateMin)} to ${fdate(s.dateMax)}` : "—"}</td></tr>`).join("")}</tbody></table></div>
+      <div class="panel-body">
+        ${item(un.length ? "warn" : "good", un.length ? "Active outlets missing from the zone master" : "All active outlets are mapped", un.length ? `${esc(un.join(", "))}. They show as Unmapped and are left out of target-weighted results only.` : "Every active outlet joined to the hierarchy master.")}
+        ${item(rev.length ? "info" : "good", rev.length ? "Net movement reversals" : "No net reversal outlets", rev.length ? `${esc(rev.join(", "))}. Kept as net movement and flagged rather than zeroed.` : "Net movement values are non-negative for all outlets.")}
+        ${item(dup.length ? "bad" : "good", dup.length ? "Duplicate outlet codes in the zone master" : "Zone master codes are unique", dup.length ? esc(dup.join(", ")) : `${int(q.zone?.rows)} outlets, no duplicated code.`)}
+        ${item(al.aligned ? "good" : "warn", al.aligned ? "Source periods line up" : "Source periods do not line up", al.aligned ? "Sales, consumable and wastage cover the same days." : `${esc((al.laggingSources || []).join(", ") || "A source")} ends before sales. Consumable corrects for this through its posting window; the two wastage rates are understated. Filter to ${fdate(al.commonStart)} to ${fdate(al.commonEnd)} for a like-for-like view.`)}
+        ${item((w.outletsWithoutPosting || []).length ? "info" : "good", "Consumable base counted to each outlet's last posting date", `${int(w.outletsTruncated)} of ${int(w.outletsWithPosting)} posting outlets stop before ${fdate(w.salesLastDate)}, holding back ${esc(exact(w.excludedSales))} of ${esc(exact(w.salesTotal))} sales. The full-period rate reads ${cwPct(w.rateOnPostedWindow)} instead of ${cwPct(w.rateOnFullSales)}.`)}
+        ${rc.reportedTotal != null ? item(rc.matches ? "good" : "info", rc.matches ? "Sales reconciles to the file's total row" : "Sales detail differs from the file's total row", `Detail rows ${esc(exact(rc.detailTotal))} against total row ${esc(exact(rc.reportedTotal))}.`) : ""}
+      </div></section>`;
+  }
+
+  function wireCw(root) {
+    $$("[data-cwoutlet]", root).forEach((n) => { n.onclick = () => openCwOutlet(n.dataset.cwoutlet); n.onkeydown = (e) => { if (e.key === "Enter") openCwOutlet(n.dataset.cwoutlet); }; });
+    $$("[data-cwsel]", root).forEach((s) => (s.onchange = () => { S.cwv[s.dataset.cwsel] = s.value; changed(); }));
+    $$("[data-cwdate]", root).forEach((i) => (i.onchange = () => { if (i.value) { S.cwv[i.dataset.cwdate] = i.value; changed(); } }));
+    $$("[data-cwquick]", root).forEach((s) => (s.onchange = () => {
+      const { min, max } = S.cw.dateRange, q = s.value;
+      if (!q) return;
+      const from = q === "all" ? min : q === "mtd" ? max.slice(0, 8) + "01" : shiftDay(max, -(Number(q) - 1));
+      S.cwv.from = from < min ? min : from; S.cwv.to = max;
+      changed();
+    }));
+    $$("[data-cwcompare]", root).forEach((b) => (b.onclick = () => { S.cwv.compare = !S.cwv.compare; render(); }));
+    $$("[data-cwraw]", root).forEach((b) => (b.onclick = () => cwRaw(b.dataset.cwraw)));
+    $$("[data-cwcrit]", root).forEach((n) => { const go = () => { S.cwCrit = n.dataset.cwcrit; location.hash = "cwo"; }; n.onclick = go; n.onkeydown = (e) => { if (e.key === "Enter") go(); }; });
+    $$("[data-cwcrit-clear]", root).forEach((b) => (b.onclick = () => { S.cwCrit = null; render(); }));
+  }
+
   // ------------------------------------------------------------------ drawer
   function openOutlet(code) {
     const o = rep()?.outlets.find((x) => x.c === code);
@@ -2092,7 +2638,7 @@
     $("#filters").hidden = !FILTER_PAGES.has(S.page);
     if (FILTER_PAGES.has(S.page)) renderFilters();
     const p = S.page;
-    const PAGE = { overview: pageOverview, achievement: pageAchievement, growth: pageGrowth, footfall: pageFootfall, ranking: pageRanking, category: pageCategory, loss: pageLoss, performance: pageKPI, dq: pageDQ, on: pageON, gm: pageGM };
+    const PAGE = { overview: pageOverview, achievement: pageAchievement, growth: pageGrowth, footfall: pageFootfall, ranking: pageRanking, category: pageCategory, loss: pageLoss, performance: pageKPI, dq: pageDQ, on: pageON, gm: pageGM, cw: pageCW, cwl: pageCWL, cwx: pageCWX, cwb: pageCWB, cwm: pageCWM, cwo: pageCWO };
     AFTER = [];
     const html = PAGE[p] ? PAGE[p]() : EMBEDS[p] ? pageEmbed(p) : pageOverview();
     // keep embedded iframes alive when only filters change

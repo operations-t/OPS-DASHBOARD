@@ -59,6 +59,7 @@ Coolify: press **Restart** on the application; the refresh runs at start-up.
 - `index.html`, `assets/` — the site
 - `scripts/build_data.py` — downloads and reads the Drive files (run `python scripts/build_data.py --local <folder>` to test with local copies in `tilldate/`, `monthend/`, `performance/` subfolders)
 - `scripts/network/refresh.py` — downloads the outlet network folder and builds `data/network.json` (standard library only)
+- `scripts/cw/refresh.py` — downloads the Consumable & Wastage Control folder (Target.txt, Sales-Till, Zone Distribution, CONSUMABLE, WASTAGE) and builds `data/cw.json`
 - `.github/workflows/refresh-data.yml` — the hourly refresh
-- `data/data.json`, `data/network.json`, `data/network-sync.json` — generated data (don't edit by hand)
+- `data/data.json`, `data/network.json`, `data/network-sync.json`, `data/cw.json` — generated data (don't edit by hand)
 - `Dockerfile`, `deploy/` — Coolify / Docker packaging (nginx + hourly refresh + optional login)

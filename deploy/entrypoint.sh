@@ -16,6 +16,7 @@ fi
   while true; do
     python3 /app/scripts/build_data.py || echo "Refresh failed; keeping the last good data."
     python3 /app/scripts/network/refresh.py || echo "Outlet network refresh failed; keeping the last good data."
+    python3 /app/scripts/cw/refresh.py || echo "Consumable and wastage refresh failed; keeping the last good data."
     sleep $(( ${REFRESH_MINUTES:-60} * 60 ))
   done
 ) &
