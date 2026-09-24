@@ -7,7 +7,7 @@
 
   // ------------------------------------------------------------------ config
   const NAV = [
-    { group: "", items: [["gm", "Growth & momentum"]] },
+    { group: "", items: [["gm", "Growth & momentum"], ["on", "Outlet network"]] },
     { group: "Sales", items: [["overview", "Overview"], ["achievement", "Sales achievement"], ["growth", "Sales growth"], ["footfall", "Footfall and basket"], ["ranking", "Growth and degrowth"], ["loss", "Loss-making outlets"], ["category", "Category performance"]] },
     { group: "Performance", items: [["performance", "KPI performance"]] },
     { group: "Connected dashboards", items: [["av", "Availability"], ["cw", "Consumable and wastage"], ["gpva", "GPVA% Tracker"], ["cc", "Credit Card Extra Amount"], ["vc", "Visit Compliance"]] },
@@ -20,7 +20,8 @@
   const EMBEDS = {
     av: { url: "https://operations-t.github.io/AV/", desc: "Core, KVI, promo and e-commerce availability by outlet and SKU." },
     cw: { url: "https://operations-t.github.io/consumable-wastage-n/", desc: "Consumable and wastage cost against target by outlet." },
-    gm: { url: "https://operations-t.github.io/outlet-network-dashboard/", desc: "Outlet network growth and momentum." },
+    gm: { url: "https://operations-t.github.io/outlet-network-dashboard/insights.html", desc: "Momentum quadrant, top movers, trading-day heatmap, month trajectory and leadership league table." },
+    on: { url: "https://operations-t.github.io/outlet-network-dashboard/index.html", desc: "Outlet network by region, zone, format and opening date." },
     gpva: { url: "https://outlet-wise-gpva.shwapno.app/", desc: "Outlet-wise GPVA% tracking." },
     cc: { url: "https://aftabz-lab.github.io/credit-card-extra-amount/", desc: "Credit card extra amount by outlet." },
     vc: { url: "https://aftabz-lab.github.io/visit-compliance-dashboard/", desc: "Outlet visit schedules and compliance." },
