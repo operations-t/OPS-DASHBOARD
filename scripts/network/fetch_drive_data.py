@@ -36,12 +36,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from build_dashboard_data import DATA_DIR, DRIVE_MANIFEST as MANIFEST, NS, find_header, norm, read_first_sheet  # noqa: E402
+import build_dashboard_data as build  # noqa: E402
+from build_dashboard_data import DATA_DIR, DRIVE_MANIFEST as MANIFEST, NS, find_header, norm, read_named_sheet  # noqa: E402
 
-DEFAULT_FOLDER_ID = "1mcEmZg6DV0xQzWImuNyZFPhfg4oc0YTB"
-FOLDER_ID = (os.environ.get("NETWORK_FOLDER_ID") or DEFAULT_FOLDER_ID).strip()
+# The mother folder that holds every dashboard's data. Every workbook under it is
+# recognised by its layout, so it can sit in any sub-folder under any name.
+DEFAULT_FOLDER_ID = "1Te9stxbcBsIIO8bNElPuDXXPovkk4v1l"
+FOLDER_ID = (os.environ.get("NETWORK_FOLDER_ID") or os.environ.get("DATA_FOLDER_ID") or DEFAULT_FOLDER_ID).strip()
 API_KEY = (os.environ.get("GDRIVE_API_KEY") or "").strip()
-MAX_DEPTH = 0  # 0 = only files directly inside the shared folder
+MAX_DEPTH = 3  # sub-folder levels searched under the mother folder
+# Optional download cache shared by the refresh scripts in one run (set DRIVE_CACHE to a folder).
+CACHE_DIR = Path(os.environ["DRIVE_CACHE"]) if os.environ.get("DRIVE_CACHE") else None
 
 # Overridable only so the script can be tested against a local mock server.
 EMBED_BASE = os.environ.get("DRIVE_EMBED_BASE", "https://drive.google.com/embeddedfolderview")
@@ -202,12 +207,21 @@ def fetch_bytes(item: dict) -> bytes:
         url = f"{API_BASE}/files/{file_id}?alt=media&supportsAllDrives=true&key={API_KEY}"
     else:
         url = f"{DOWNLOAD_BASE}?id={file_id}&export=download&confirm=t"
+    cached = None
+    if CACHE_DIR:
+        key = hashlib.sha256(f"{item['id']}|{item.get('modified', '')}".encode()).hexdigest()[:24]
+        cached = CACHE_DIR / key
+        if cached.exists():
+            return cached.read_bytes()
     body, headers = http_get(url)
     if "accounts.google.com" in headers.get("x-final-url", "") or any(m in body[:20000] for m in GOOGLE_PAGE_MARKERS):
         raise RuntimeError(
             f"'{item['path']}' returned a Google sign-in/warning page instead of the file. "
             "Check that it is shared as 'Anyone with the link'."
         )
+    if cached:
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        cached.write_bytes(body)
     return body
 
 
@@ -244,10 +258,11 @@ def content_role(path: Path) -> str:
     if any(norm(name).startswith(LAST_MONTH_SHEET_PREFIX) for name in sheet_names(path)):
         return "lastMonth"
     try:
-        _, rows = read_first_sheet(path)
+        # Only the first rows are needed to recognise a layout; big workbooks stay cheap.
+        _, rows = read_named_sheet(path, (sheet_names(path)[0],), max_rows=30)
     except Exception:  # noqa: BLE001 - unreadable workbook is simply "unknown"
         return ""
-    code = {"code", "outlet code", "store code"}
+    code = {"code", "outlet code", "store code", "outlet"}
     try:
         _, cols = find_header(rows, {"code", "date", "sales"}, {
             "code": code,
@@ -273,11 +288,47 @@ def content_role(path: Path) -> str:
     return "dayWiseTarget" if date_like >= 5 else ""
 
 
+MONTHS = {m: i for i, m in enumerate(("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"), 1)}
+
+
+def target_month(candidates: dict) -> tuple[int, int] | None:
+    """(year, month) of the day-wise target workbook, read from its date header."""
+    for item in candidates.get("dayWiseTarget", []):
+        try:
+            _, rows = read_named_sheet(item["local"], (sheet_names(item["local"])[0],), max_rows=30)
+        except Exception:  # noqa: BLE001
+            continue
+        for row in rows:
+            for value in row:
+                iso = build.excel_date_to_iso(value) if isinstance(value, (int, float)) and 40000 < value < 80000 else str(value or "")
+                if re.match(r"^\d{4}-\d{2}-\d{2}", iso):
+                    return int(iso[:4]), int(iso[5:7])
+    return None
+
+
+def period_match(role: str, item: dict, candidates: dict) -> bool:
+    """For last month: does this workbook's SPLY period sit in the month before the target month?"""
+    if role != "lastMonth":
+        return False
+    if "period" not in item:
+        build.LAST_MONTH_FILE = item["local"]
+        try:
+            item["period"] = build.read_last_month_sales()[1].get("periodLabel", "")
+        except Exception:  # noqa: BLE001
+            item["period"] = ""
+    tm = target_month(candidates)
+    m = re.search(r"sply\s+([a-z]{3})[a-z]*\.?\s+\d.*?(20\d{2})", item["period"].lower())
+    if not tm or not m or m.group(1) not in MONTHS:
+        return False
+    prev = (tm[0] - 1, 12) if tm[1] == 1 else (tm[0], tm[1] - 1)
+    return (int(m.group(2)), MONTHS[m.group(1)]) == prev
+
+
 def main() -> int:
     log(f"Listing Google Drive folder {FOLDER_ID} ({'Drive API' if API_KEY else 'public link'})…")
     files = [f for f in walk(FOLDER_ID) if is_spreadsheet(f)]
     if not files:
-        log("::error::No Excel workbooks found directly inside the Drive folder.")
+        log("::error::No Excel workbooks found in the Drive folder.")
         return 1
 
     candidates: dict[str, list[dict]] = {role: [] for role in ROLES}
@@ -310,8 +361,9 @@ def main() -> int:
                     return 1
                 log(f"  (no {spec['label']} workbook – last-month figures will show as —)")
                 continue
-            # Prefer the canonical filename, then the most recently modified file.
-            options.sort(key=lambda f: (f["name"].lower() == spec["target"], modified_sort_key(f)), reverse=True)
+            # Newest first. For last month, the workbook whose SPLY period is the month
+            # before the target month wins (the month-end report, not the till-date one).
+            options.sort(key=lambda f: (period_match(role, f, candidates), modified_sort_key(f)), reverse=True)
             if len(options) > 1:
                 log(f"::warning::{len(options)} {spec['label']} workbooks found; using {options[0]['path']}. "
                     f"Others: {', '.join(o['path'] for o in options[1:])}")

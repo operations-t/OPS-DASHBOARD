@@ -1424,7 +1424,7 @@
       <div class="grid-h">${oversight}${shareBars("Coverage by division", "Outlet count and share of the outlets in view.", "division", "Division")}</div>
       <div class="grid-h">${mix}${shareBars("Location type", "Where outlets trade.", "locationType", "Location type")}</div>
       ${launch}${register}
-      <p class="muted" style="margin:0;font-size:11.5px">Outlet network data from the outlet-network Google Drive folder${driveNote() ? `, synced ${esc(driveNote())}` : ""}. ${d.source?.lastMonth?.matchedOutlets ? `${esc(lm)} baseline on ${int(d.source.lastMonth.matchedOutlets)} outlets.` : ""}</p>`;
+      <p class="muted" style="margin:0;font-size:11.5px">Outlet network data from the mother Google Drive folder${driveNote() ? `, synced ${esc(driveNote())}` : ""}. ${d.source?.lastMonth?.matchedOutlets ? `${esc(lm)} baseline on ${int(d.source.lastMonth.matchedOutlets)} outlets.` : ""}</p>`;
   }
 
   // ---- Growth & momentum page
@@ -2032,7 +2032,7 @@
       <div class="table-wrap"><table><thead><tr><th>File</th><th>Type</th><th>Data</th></tr></thead><tbody>
       ${roles.map(([k, t]) => `<tr><td class="cell-primary">${esc(files[k] || used[k] || "—")}</td><td>${esc(t)}</td><td>${k === "dayWiseSales" ? `Sales through ${fdate(src.salesThroughDate)}` : k === "dayWiseTarget" ? fmonth(src.reportMonth || S.net.month) : k === "lastMonth" ? (src.lastMonth?.monthLabel ? `${esc(src.lastMonth.monthLabel)}, ${int(src.lastMonth.matchedOutlets)} outlets matched` : "Not in the folder, so last-month figures show as —") : `${int(S.net.rows.length)} outlets`}</td></tr>`).join("")}
       </tbody></table></div>
-      <div class="panel-body"><p class="muted" style="margin:0;max-width:78ch">Put the four workbooks directly in the outlet network Drive folder, shared as "Anyone with the link". The same hourly refresh picks them up${driveNote() ? `; last synced ${esc(driveNote())}` : ""}. If a required workbook is missing or broken, the pages keep the last good data.</p></div></section>`;
+      <div class="panel-body"><p class="muted" style="margin:0;max-width:78ch">All four come from the mother Drive folder (any sub-folder, any name): day-wise sales is the till-date sales file (Outlet, Date, Article Division, POS NSI), last month is the Business Performance Report whose SPLY period is the previous month. The same hourly refresh picks them up${driveNote() ? `; last synced ${esc(driveNote())}` : ""}. If a required workbook is missing or broken, the pages keep the last good data.</p></div></section>`;
   }
 
   function wireNet(root) {
@@ -2558,7 +2558,7 @@
 
   // ---- data quality (shown on the Data quality page)
   function cwQualityPanel() {
-    const head = `<div class="panel-head"><div><h2>Consumable and wastage files</h2><p>Consumable, wastage, sales and targets come from the Consumable & Wastage Control Drive folder; Zone Distribution from the Performance folder. Each file is recognised by its columns, so filenames don't matter.</p></div></div>`;
+    const head = `<div class="panel-head"><div><h2>Consumable and wastage files</h2><p>All five files come from the mother Drive folder, from any sub-folder. Each is recognised by its columns, so filenames and folders don't matter; sales is the same till-date file the Outlet network uses.</p></div></div>`;
     if (!S.cw) { loadCw(); return `<section class="panel">${head}<div class="panel-body"><p class="muted" style="margin:0">${S.cwErr ? `cw.json could not be loaded (${esc(S.cwErr)}).` : "Loading…"}</p></div></section>`; }
     const q = S.cw.dataQuality, w = q.consumableWindow || {}, un = q.unmappedActiveOutlets || [], rc = q.sales?.reconciliation || {}, al = q.periodAlignment || {};
     const rev = [...new Set([...(q.negativeNetConsumableOutlets || []), ...(q.negativeNetWastageOutlets || [])])], dup = q.zone?.duplicateCodes || [];

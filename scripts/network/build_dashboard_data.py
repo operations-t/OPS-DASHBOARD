@@ -420,7 +420,7 @@ def build() -> dict:
         sales_rows,
         {"code", "date", "sales"},
         {
-            "code": {"outlet code", "code", "store code"},
+            "code": {"outlet code", "code", "store code", "outlet"},
             "date": {"date", "sales date", "business date", "transaction date", "pos date"},
             "sales": {"pos nsi", "daily sales", "actual sales", "net sales", "sales"},
         },

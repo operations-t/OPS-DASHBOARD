@@ -1,26 +1,21 @@
 #!/usr/bin/env python3
 """Refresh data/cw.json for the Consumable & wastage pages.
 
-Reads two public Google Drive folders (sub-folders included):
-
-* Consumable & Wastage Control — the CONSUMABLE and WASTAGE SAP exports,
-  Sales-Till and the target file;
-* Performance — the Zone Distribution outlet master (shared with the rest of
-  the dashboard, so it lives in one place).
-
-Every file is recognised by its STRUCTURE, never by its name:
+Reads the mother Google Drive folder that holds every dashboard's data,
+sub-folders included. Every file is recognised by its STRUCTURE, never by its
+name or folder:
 
 * SAP movement export — a Posting Date + Plant + Amount header. Movement type
   551 (write-off) is wastage; Z21/Z22 (consumable issue / reversal) is
   consumable. If the movement type is unfamiliar, material codes starting 60
   (consumable stores) decide.
-* Sales — Outlet Code + Date + Division + POS NSI.
+* Sales till date — Outlet (Code) + Date + (Article) Division + POS NSI.
 * Zone Distribution — CODE + Outlet Name + Format + Division + District +
   PNP Non PNP status + Status.
 * Targets — a Final Criteria column with the three target % columns.
 
 When two files of the same kind are found, the one whose data runs latest
-wins (Zone Distribution: the most recently modified in Drive).
+wins (Zone Distribution and targets: the most recently modified in Drive).
 
 Exit code 1 = the refresh failed; cw.json is left untouched, so the dashboard
 keeps showing the last good data.
@@ -44,13 +39,12 @@ import build_data as bd  # noqa: E402
 import fetch_drive_data as drive  # noqa: E402  (stdlib public-folder listing and download)
 from openpyxl import load_workbook  # noqa: E402
 
-CW_FOLDER = (os.environ.get("CW_FOLDER_ID") or "1FLbOzMJnihnXWO6hfSJeI5vJ1VFSI1RD").strip()
-ZONE_FOLDER = (os.environ.get("ZONE_FOLDER_ID") or "1r09IGv8Pk0J86li4hqLD8gskj5j3SBih").strip()
+FOLDER = (os.environ.get("CW_FOLDER_ID") or os.environ.get("DATA_FOLDER_ID") or "1Te9stxbcBsIIO8bNElPuDXXPovkk4v1l").strip()
 OUT = Path(os.environ.get("CW_OUT") or ROOT / "data" / "cw.json")
 DATA_SUFFIXES = (".xlsx", ".xlsm", ".xls", ".txt", ".csv", ".tsv")
 WASTAGE_MOVES = {"551", "552"}
 CONSUMABLE_MOVES = {"Z21", "Z22", "201", "202"}
-SALES_HEADERS = {"outlet code", "date", "division", "pos nsi"}
+SALES_LAYOUTS = ({"outlet code", "date", "division", "pos nsi"}, {"outlet", "date", "article division", "pos nsi"})
 ZONE_HEADERS = {"code", "outlet name", "format", "division", "district", "pnp non pnp status", "status"}
 TARGET_HEADERS = {"final criteria", *(h.casefold() for h in bd.TARGET_COLUMNS.values())}
 
@@ -94,14 +88,30 @@ def sap_kind(path):
 
 
 def sheet_headers(path, rows=15):
-    """Yield (sheet, row index, normalised header set) for the first rows of every sheet."""
+    """Yield (raw cells, normalised header set) for the first rows of every sheet."""
     wb = load_workbook(io.BytesIO(path.read_bytes()), read_only=True, data_only=True)
     try:
         for ws in wb.worksheets:
-            for i, row in enumerate(ws.iter_rows(values_only=True, max_row=rows)):
-                yield ws, i, {norm(v) for v in row if v not in (None, "")}
+            for row in ws.iter_rows(values_only=True, max_row=rows):
+                yield [bd.clean_text(v) for v in row], {norm(v) for v in row if v not in (None, "")}
     finally:
         wb.close()
+
+
+def classify(path):
+    """Cheap first look at the top rows; the full SAP scan only runs on a SAP-shaped file."""
+    if path.read_bytes()[:4] != b"PK\x03\x04":
+        return sap_kind(path) or table_kind(path)  # legacy .xls or text export
+    for cells, heads in sheet_headers(path):
+        if bd.locate_sap_header(cells) is not None:
+            return sap_kind(path)
+        if any(layout <= heads for layout in SALES_LAYOUTS):
+            return "sales", sales_latest(path)
+        if ZONE_HEADERS <= heads:
+            return "zones", None
+        if TARGET_HEADERS <= heads:
+            return "targets", None
+    return None
 
 
 def table_kind(path):
@@ -109,7 +119,7 @@ def table_kind(path):
     data = path.read_bytes()
     if data[:4] == b"PK\x03\x04":
         for ws, i, heads in sheet_headers(path):
-            if SALES_HEADERS <= heads:
+            if any(layout <= heads for layout in SALES_LAYOUTS):
                 return "sales", sales_latest(path)
             if ZONE_HEADERS <= heads:
                 return "zones", None
@@ -144,8 +154,8 @@ def main():
     with tempfile.TemporaryDirectory(prefix="cw-") as work:
         work = Path(work)
         found = {k: [] for k in ("consumable", "wastage", "sales", "zones", "targets")}
-        for label, folder, kinds in (("Consumable & Wastage Control", CW_FOLDER, {"consumable", "wastage", "sales", "targets"}),
-                                     ("Performance (Zone Distribution)", ZONE_FOLDER, {"zones"})):
+        kinds = set(found)
+        for label, folder in (("data", FOLDER),):
             log(f"Listing {label} folder {folder}…")
             try:
                 items = drive.walk(folder)
@@ -162,18 +172,19 @@ def main():
                 except RuntimeError as err:
                     log(f"::warning::{err}")
                     continue
-                sap_possible = "consumable" in kinds and (suffix != ".txt" or dest.stat().st_size > 20000)
-                kind = sap_kind(dest) if sap_possible else None
-                kind = kind or table_kind(dest)
+                try:
+                    kind = classify(dest)
+                except Exception:  # noqa: BLE001 - unreadable file is simply not ours
+                    kind = None
                 if not kind or kind[0] not in kinds:
-                    log(f"  skip  {item['path']}  (not a {'/'.join(sorted(kinds))} layout)")
+                    log(f"  skip  {item['path']}  (not a consumable/wastage layout)")
                     dest.unlink()
                     continue
                 # Keep the Drive name (bd reports it on the Data quality page) inside a per-file folder.
                 named = work / f"f{n}{label[:2]}" / item["name"]
                 named.parent.mkdir()
                 dest.rename(named)
-                found[kind[0]].append((kind[1], drive.modified_sort_key(item), named))
+                found[kind[0]].append((kind[1], drive.modified_sort_key(item), named, item["path"]))
                 log(f"  found {item['path']}  →  {kind[0]}" + (f" (data to {kind[1]})" if kind[1] else ""))
         missing = [k for k, v in found.items() if not v]
         if missing:
@@ -183,7 +194,7 @@ def main():
         for kind, options in found.items():
             options.sort(key=lambda o: (o[0] or bd.dt.date.min, o[1]), reverse=True)
             if len(options) > 1:
-                log(f"::warning::{len(options)} {kind} files found; using {options[0][2].name}.")
+                log(f"::warning::{len(options)} {kind} files found; using {options[0][3]}. Others: {', '.join(o[3] for o in options[1:])}")
             files[kind] = options[0][2]
         try:
             payload = bd.build_dashboard_data(work, files)

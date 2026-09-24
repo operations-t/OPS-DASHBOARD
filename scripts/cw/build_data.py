@@ -339,6 +339,14 @@ def read_zone_distribution(path: Path, targets: dict[str, dict[str, Any]]) -> tu
     return records, quality
 
 
+SALES_ALIASES = {
+    "Outlet Code": {"outlet code", "outlet", "plant", "store code"},
+    "Date": {"date", "posting date", "sales date", "business date"},
+    "Division": {"division", "article division"},
+    "POS NSI": {"pos nsi"},
+}
+
+
 def read_sales(path: Path) -> tuple[dict[tuple[str, dt.date], dict[str, float]], dict[str, Any]]:
     workbook = load_workbook(path, read_only=True, data_only=True)
     sheet_name = "Comparative" if "Comparative" in workbook.sheetnames else workbook.sheetnames[0]
@@ -346,6 +354,12 @@ def read_sales(path: Path) -> tuple[dict[tuple[str, dt.date], dict[str, float]],
     rows = sheet.iter_rows(values_only=True)
     headers = [clean_text(value) for value in next(rows)]
     index = {header: position for position, header in enumerate(headers)}
+    # Accept both till-date layouts: "Outlet Code / Division" and "Outlet / Article Division".
+    for canonical, aliases in SALES_ALIASES.items():
+        if canonical not in index:
+            found = next((index[h] for h in headers if h.casefold() in aliases), None)
+            if found is not None:
+                index[canonical] = found
     required = {"Outlet Code", "Date", "Division", "POS NSI"}
     missing = sorted(required - set(index))
     if missing:

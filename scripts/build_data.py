@@ -138,6 +138,10 @@ def classify(path):
         f = flat(rows)
         if "code" in f and "zonal" in f and "format" in f:
             return "master", (wb, heads)
+    for rows in heads.values():
+        f = flat(rows)
+        if "pos nsi" in f and "date" in f and ({"outlet", "outlet code"} & f):
+            return None, None  # till-date sales by outlet and day: used by the other dashboards, not this build
     issue("warn", os.path.basename(path), "Unrecognised file: no known sheet layout found. It was skipped.")
     return None, None
 

@@ -16,6 +16,8 @@ jobs:
   refresh:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      DRIVE_CACHE: ${{ runner.temp }}/drive-cache   # one download of each Drive file per run
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

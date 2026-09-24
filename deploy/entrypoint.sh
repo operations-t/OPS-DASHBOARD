@@ -12,8 +12,10 @@ fi
 
 # Refresh loop: download Drive folders and rebuild data.json and network.json.
 # A failed run keeps the last good data.
+export DRIVE_CACHE=/tmp/drive-cache   # one download of each Drive file per refresh
 (
   while true; do
+    rm -rf "$DRIVE_CACHE"
     python3 /app/scripts/build_data.py || echo "Refresh failed; keeping the last good data."
     python3 /app/scripts/network/refresh.py || echo "Outlet network refresh failed; keeping the last good data."
     python3 /app/scripts/cw/refresh.py || echo "Consumable and wastage refresh failed; keeping the last good data."

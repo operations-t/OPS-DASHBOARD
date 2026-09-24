@@ -16,18 +16,24 @@ Filenames don't matter. Every folder must stay shared as "Anyone with the link",
 
 If a file is broken or missing, the refresh is rejected and the site keeps the last good data. The Data quality page lists every problem found.
 
+### The mother Drive folder
+
+All data now lives under one mother folder, [Operations data](https://drive.google.com/drive/folders/1Te9stxbcBsIIO8bNElPuDXXPovkk4v1l), shared as "Anyone with the link". The Outlet network, Growth & momentum and Consumable & wastage refreshes search every sub-folder of it and recognise each file by its columns, never by its name. The main sales pages still read the Daily, Month-end and Performance sub-folders by their links, so keep those three folders.
+
+One till-date sales file (columns **Outlet, Date, Article Division, POS NSI**) feeds both the Outlet network pages and Consumable & wastage; keep it current. If two files of the same kind exist, the one whose data runs latest wins (for Zone Distribution, the most recently modified).
+
 ### Outlet network and Growth & momentum
 
-These two pages are built into this dashboard and read `data/network.json`, which the same hourly refresh builds from a fourth folder, the [outlet network Drive folder](https://drive.google.com/drive/folders/1mcEmZg6DV0xQzWImuNyZFPhfg4oc0YTB). Put these workbooks directly in it (sub-folders are ignored, so an `Old` folder can hold last month's files):
+These two pages are built into this dashboard and read `data/network.json`, which the same hourly refresh builds from the mother folder. It needs these workbooks, anywhere under it:
 
 | Workbook | How it is recognised | Required |
 |---|---|---|
 | Outlet master / Zone Distribution | `CODE` + `Outlet Name` header with `Leader` / `Zonal` / `Format` columns | yes |
 | Day-wise target | `Outlet Code` + `Outlet Name` header followed by daily date columns | yes |
-| Day-wise sales | `Outlet Code` + `Date` + `POS NSI` | yes |
-| Last month (SPLY) | a sheet named `SPLY-ALL (…)` with `Code` and `SALES THIS` | optional |
+| Day-wise sales | the till-date sales file: `Outlet` (or `Outlet Code`) + `Date` + `POS NSI`, divisions are summed | yes |
+| Last month (SPLY) | a Business Performance Report whose `SPLY-ALL (…)` period is the month before the target month (the month-end report) | optional |
 
-Keep one workbook of each kind; if there are two, the standard name (`zone-distribution.xlsx`, `day-wise-target.xlsx`, `day-wise-sales.xlsx`, `last-month.xlsx`) wins, then the newest. Without a last-month workbook every last-month figure shows as —. The month-end projection is actual sales to date plus separate average-sales forecasts for the remaining Fridays, Saturdays and Sunday–Thursday days, and month-on-month growth is measured only on outlets that have a last-month figure. A failed network refresh never blocks `data.json`; the pages keep the last good `network.json`.
+Without a last-month workbook every last-month figure shows as —. The month-end projection is actual sales to date plus separate average-sales forecasts for the remaining Fridays, Saturdays and Sunday–Thursday days, and month-on-month growth is measured only on outlets that have a last-month figure. A failed network refresh never blocks `data.json`; the pages keep the last good `network.json`.
 
 ## First-time setup on GitHub
 
