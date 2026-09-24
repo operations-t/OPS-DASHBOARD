@@ -1,0 +1,21 @@
+/* Focused dashboard updates; keep the base design system intact. */
+.brand .brand-mark{
+  display:block;width:72px;height:36px;flex:0 0 72px;
+  object-fit:contain;background:transparent;border-radius:0;
+}
+
+/* Grow the existing right-anchored 560px drawer by 20% toward the left. */
+.drawer{width:min(672px,100vw)}
+.drawer-body>*{min-width:0}
+
+.age-drill-link{
+  appearance:none;border:0;border-radius:var(--radius-chip);background:transparent;
+  color:var(--ink-2);padding:2px 0;font:inherit;font-variant-numeric:tabular-nums;
+  text-align:right;text-decoration:underline;text-underline-offset:3px;cursor:pointer;
+}
+.age-drill-link:hover{color:var(--info)}
+.age-drill-link.down{color:var(--bad)}
+.age-drill-back{align-self:flex-start}
+#t-age-outlets td:first-child{white-space:normal;min-width:150px;max-width:260px}
+#t-age-outlets .panel-tools{max-width:100%}
+tr[data-pnl]{cursor:pointer}

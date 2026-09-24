@@ -34,7 +34,7 @@
   ];
 
   const S = { data: null, page: "overview", period: "tilldate", filters: {}, openDim: null, tables: {}, level: "rl", bands: new Set(), lastFocus: null,
-    cmp: "y", scope: "all", trend: "all", kp: null, kl: "rho", kv: "rank", pm: null, pbasis: "after", pstat: "all", plevel: "rl" };
+    cmp: "y", scope: "all", trend: "all", kp: null, kl: "rho", kv: "rank", pm: null, pbasis: "after", pstat: "all", plevel: "rl", ageDrill: null };
   DIMS.forEach(([k]) => (S.filters[k] = new Set()));
 
   // ------------------------------------------------------------------ format
@@ -445,6 +445,7 @@
   const cmpSeg = () => seg("cmp", [["y", "vs last year"], ["m", "vs last month"]], "Compare with");
 
   function wireDyn(root) {
+    $$("[data-age-band]", root).forEach((b) => (b.onclick = () => openAgeOutlets(b.dataset.ageBand, b.dataset.ageScope === "loss")));
     $$("[data-outlet]", root).forEach((tr) => { tr.onclick = () => openOutlet(tr.dataset.outlet); tr.onkeydown = (e) => { if (e.key === "Enter") openOutlet(tr.dataset.outlet); }; });
     $$("[data-pnl]", root).forEach((tr) => { tr.onclick = () => openPnl(tr.dataset.pnl); tr.onkeydown = (e) => { if (e.key === "Enter") openPnl(tr.dataset.pnl); }; });
     $$("[data-khead]", root).forEach((tr) => { tr.onclick = () => openHead(tr.dataset.khead); tr.onkeydown = (e) => { if (e.key === "Enter") openHead(tr.dataset.khead); }; });
@@ -727,6 +728,47 @@
   }
   const ageBand = (a) => (a == null ? "Opening date unknown" : AGE_BANDS.find(([, lo, hi]) => a >= lo && a < hi)[0]);
   const ageTxt = (a) => (a == null ? "—" : a < 12 ? `${a} mo` : `${(a / 12).toFixed(1)} yr`);
+  function ageDrillLink(bandName, scope, value, label, cls = "") {
+    return `<button type="button" class="age-drill-link ${cls}" data-age-band="${esc(bandName)}" data-age-scope="${scope}" aria-label="${esc(label + ": " + bandName)}" title="${esc(label + ": " + bandName)}">${value}</button>`;
+  }
+  function openAgeOutlets(bandName, onlyLoss) {
+    if (!S.data.pnl) return;
+    S.lastFocus = document.activeElement;
+    S.ageDrill = { bandName, onlyLoss, outlet: null };
+    delete S.tables["age-outlets"];
+    drawAgeOutlets();
+  }
+  function drawAgeOutlets() {
+    const context = S.ageDrill;
+    if (!context) return;
+    const { bandName, onlyLoss } = context;
+    const rows = inView().map((o) => ({ o, ...pnlCalc(o) }))
+      .filter((x) => !x.closed && ageBand(x.age) === bandName && (!onlyLoss || x.loss))
+      .map((x) => ({ ...x, key: x.o.c, name: x.o.nm, sub: `${x.o.c}, ${x.o.dim.rl}, ${x.o.dim.zn}`, s: x.o.s }));
+    const periodName = S.pm === "ytd" ? "Year to date" : fmonth(S.pm);
+    const basisName = S.pbasis === "after" ? "after financing cost" : "before financing cost";
+    $("#drawerTitle").textContent = `${onlyLoss ? "Loss-making outlets" : "Trading outlets"}: ${bandName}`;
+    $("#drawerBody").innerHTML = mountTable("age-outlets", {
+      title: `${periodName}, ${basisName}`, file: `outlets_by_age_${bandName.toLowerCase().replace(/[^a-z0-9]+/g, "_")}_${onlyLoss ? "loss" : "all"}_${S.pm}_${S.pbasis}`,
+      desc: (n) => `${int(n)} outlets within the selected dashboard filters. Click an outlet for its cost breakdown.`,
+      rows, key: (x) => x.key, searchText: (x) => `${x.name} ${x.sub}`, defaultSort: "pl", defaultDir: "asc",
+      rowAttr: (x) => `data-pnl="${esc(x.key)}" tabindex="0"`,
+      cols: [
+        nameCol("outlet"),
+        { k: "code", label: "Outlet code", val: (x) => x.key, fmt: (x) => esc(x.key), csv: (x) => x.key },
+        { k: "age", label: "Age", num: 1, fmt: (x) => ageTxt(x.age), csv: (x) => x.age ?? "" },
+        { k: "s", label: "Sales", num: 1, fmt: (x) => bdt(x.s), csv: (x) => Math.round(x.s || 0) },
+        { k: "pl", label: "P/L", num: 1, fmt: (x) => `<strong class="${x.pl < 0 ? "down" : "up"}">${bdt(x.pl)}</strong>`, csv: (x) => isNum(x.pl) ? Math.round(x.pl) : "" },
+        { k: "status", label: "Status", val: (x) => x.loss ? "Loss-making" : "Profitable", fmt: (x) => chip(x.loss ? LOSS_STATUS[x.st] : { cls: "good", label: "Profitable" }), csv: (x) => x.loss ? LOSS_STATUS[x.st].label : "Profitable" },
+      ],
+    });
+    drawTable("age-outlets");
+    showDrawer();
+    if (context.outlet) {
+      $$("[data-pnl]", $("#drawerBody")).find((row) => row.dataset.pnl === context.outlet)?.focus();
+      context.outlet = null;
+    }
+  }
   function pageLoss() {
     const P = S.data.pnl;
     if (!P) return `<p class="empty">No outlet P&L file is loaded yet. Add one to the Performance folder.</p>`;
@@ -749,9 +791,9 @@
       const inB = all.filter((x) => ageBand(x.age) === b), lB = inB.filter((x) => x.loss);
       return { b, n: inB.length, l: lB.length, loss: sum(lB, "pl") };
     }).filter((x) => x.n);
-    const agePanel = `<section class="panel"><div class="panel-head"><div><h2>Loss-making outlets by age</h2><p>New outlets usually lose money while they build up trade.</p></div></div>
+    const agePanel = `<section class="panel"><div class="panel-head"><div><h2>Loss-making outlets by age</h2><p>New outlets usually lose money while they build up trade. Click a number to see the matching outlets.</p></div></div>
       <div class="table-wrap"><table><thead><tr><th>Outlet age</th><th class="num">Outlets</th><th class="num">Loss-making</th><th class="num">Share</th><th class="num">Total loss</th></tr></thead><tbody>
-      ${bands.map((x) => `<tr><td class="cell-primary">${esc(x.b)}</td><td class="num">${int(x.n)}</td><td class="num">${int(x.l)}</td><td class="num">${pct(x.l / x.n)}</td><td class="num down">${bdt(x.loss)}</td></tr>`).join("")}
+      ${bands.map((x) => `<tr><td class="cell-primary">${esc(x.b)}</td><td class="num">${ageDrillLink(x.b, "all", int(x.n), "View all trading outlets")}</td><td class="num">${ageDrillLink(x.b, "loss", int(x.l), "View loss-making outlets")}</td><td class="num">${ageDrillLink(x.b, "loss", pct(x.l / x.n), "View outlets behind the loss-making share")}</td><td class="num down">${ageDrillLink(x.b, "loss", bdt(x.loss), "View outlets contributing to total loss", "down")}</td></tr>`).join("")}
       </tbody></table></div></section>`;
 
     // by level
@@ -816,7 +858,9 @@
     const P = S.data.pnl, o = pnlList().find((x) => x.c === code);
     if (!o) return;
     const x = pnlCalc(o);
-    S.lastFocus = document.activeElement;
+    const fromAgeList = !!S.ageDrill && !$("#drawer").hidden && !!$("#t-age-outlets", $("#drawerBody"));
+    if (fromAgeList) S.ageDrill.outlet = code;
+    else { S.ageDrill = null; S.lastFocus = document.activeElement; }
     $("#drawerTitle").textContent = `${o.c} ${o.nm}`;
     const stat = (l, v, sub = "") => `<div class="stat"><small>${l}</small><strong>${v}</strong>${sub ? `<div style="font-size:12px">${sub}</div>` : ""}</div>`;
     const det = detailFor(code);
@@ -832,6 +876,7 @@
         <p class="muted" style="margin:0;font-size:12px">Peers are the median of ${int(peers.n)} profitable ${fmt ? esc(fmt.toLowerCase()) + " " : ""}outlets. Red lines cost this outlet more than 0.25 pp of sales above its peers.</p>`;
     }
     $("#drawerBody").innerHTML = `
+      ${fromAgeList ? '<button type="button" class="btn age-drill-back" data-age-back>Back to outlet list</button>' : ""}
       <div class="stat-grid">
         ${stat(S.pbasis === "after" ? "P/L after financing cost" : "P/L before financing cost", `<span class="${x.pl < 0 ? "down" : "up"}">${bdt(x.pl)}</span>`, x.closed ? chip({ cls: "idle", label: "Closed outlet" }) : x.st ? chip(LOSS_STATUS[x.st]) : chip({ cls: "good", label: "Profitable" }))}
         ${S.pm === "ytd" ? stat("Months in P&L", int(o.months), "Year to date") : stat("P/L last month", bdt(x.pl0), `Change ${bdt(x.chg)}`)}
@@ -846,6 +891,7 @@
         <dt>Opened</dt><dd>${o.ld || o.m?.ld ? fdate(o.ld || o.m.ld) + ` (${ageTxt(x.age)})` : "—"}</dd><dt>Financing cost</dt><dd>${bdt(o.ofc)}</dd>
       </dl>
       <h3 style="font-size:14px">Where the money goes</h3>${costHtml}`;
+    if (fromAgeList) $("[data-age-back]", $("#drawerBody")).onclick = drawAgeOutlets;
     showDrawer();
   }
 
@@ -883,7 +929,7 @@
   }
   function closeDrawer() {
     if ($("#drawer").hidden) return;
-    $("#drawer").hidden = true; document.body.style.overflow = "";
+    $("#drawer").hidden = true; document.body.style.overflow = ""; S.ageDrill = null;
     if (!$("#rail").classList.contains("open")) $("#scrim").hidden = true;
     S.lastFocus?.focus?.();
   }
