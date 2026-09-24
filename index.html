@@ -7,7 +7,7 @@
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>">
 <link rel="stylesheet" href="assets/styles.css">
 <link rel="stylesheet" href="assets/ui-updates.css?v=cdf6b8fc88">
-<link rel="stylesheet" href="assets/network.css?v=net1">
+<link rel="stylesheet" href="assets/network.css?v=net2">
 <link rel="stylesheet" href="assets/report.css?v=net1">
 <script>try{var t=localStorage.getItem('opsdash-theme');if(t)document.documentElement.dataset.theme=t;}catch(e){}</script>
 </head>
@@ -22,6 +22,7 @@
   <div class="scrim" id="scrim" hidden></div>
   <main class="main">
     <header class="topbar">
+      <button class="btn icon rail-btn" id="railBtn" aria-controls="rail" aria-label="Hide sidebar">⇤</button>
       <button class="btn icon menu-btn" id="menuBtn" aria-label="Open menu">☰</button>
       <div class="title-block"><h1 id="pageTitle">Overview</h1><p class="scope" id="scope"></p></div>
       <div class="top-tools">
@@ -50,6 +51,6 @@
   </div>
   <div class="report-sheet" id="reportSheet"></div>
 </div>
-<script src="assets/app.js?v=net1"></script>
+<script src="assets/app.js?v=net2"></script>
 </body>
 </html>

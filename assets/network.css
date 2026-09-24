@@ -128,3 +128,10 @@
 .person strong{display:block;font-size:13px;font-weight:620}
 .person a{font-size:12px}
 .net-kpis .kpi:not(.hero) .value{font-size:clamp(20px,1.75vw,28px);white-space:nowrap}
+
+/* sidebar and filter toggles */
+.filters-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.filters-head .btn{padding:3px 10px;font-size:12px}
+.filters-note{margin:0;font-size:12px;color:var(--ink-3)}
+@media (min-width:1081px){.shell.rail-hidden .rail{display:none}}
+@media (max-width:1080px){.rail-btn{display:none}}

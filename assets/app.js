@@ -226,6 +226,19 @@
       `<button data-page="${k}" ${S.page === k ? 'aria-current="page"' : ""}>${esc(t)}${soon ? '<span class="soon">Phase 2</span>' : ""}</button>`).join("")).join("");
     $$("#nav [data-page]").forEach((b) => b.addEventListener("click", () => { location.hash = b.dataset.page; closeRail(); }));
   }
+  // Sidebar and filter visibility, remembered per browser.
+  const UI = { railHidden: false, filtersHidden: false };
+  try { Object.assign(UI, JSON.parse(localStorage.getItem("opsdash-ui") || "{}")); } catch (e) {}
+  const saveUI = () => { try { localStorage.setItem("opsdash-ui", JSON.stringify(UI)); } catch (e) {} };
+  function toggleFilters() { UI.filtersHidden = !UI.filtersHidden; S.openDim = null; saveUI(); renderFilters(); }
+  function applyRail() {
+    $(".shell").classList.toggle("rail-hidden", UI.railHidden);
+    const b = $("#railBtn");
+    b.textContent = UI.railHidden ? "☰" : "⇤";
+    b.setAttribute("aria-label", UI.railHidden ? "Show sidebar" : "Hide sidebar");
+    b.title = UI.railHidden ? "Show sidebar" : "Hide sidebar";
+    b.setAttribute("aria-expanded", String(!UI.railHidden));
+  }
   function renderFilters() {
     const base = baseList();
     const el = $("#filters");
@@ -233,7 +246,15 @@
     const same = prevDim === S.openDim;
     const keepScroll = same ? el.querySelector(".ms-list")?.scrollTop || 0 : 0;
     const keepQ = same ? el.querySelector(".ms-panel input")?.value || "" : "";
-    el.innerHTML = `<h2>Filters</h2>` + dims().map(([k, label]) => {
+    const active = dims().reduce((n, [k]) => n + S.filters[k].size, 0);
+    const head = `<div class="filters-head"><h2>Filters</h2><button class="btn" data-ftoggle aria-expanded="${!UI.filtersHidden}">${UI.filtersHidden ? "Show" : "Hide"}</button></div>`;
+    if (UI.filtersHidden) {
+      el.innerHTML = head + `<p class="filters-note">${active ? `${active} filter${active === 1 ? "" : "s"} applied` : "No filters applied"}</p>`;
+      $("[data-ftoggle]", el).onclick = toggleFilters;
+      $("#railFoot").innerHTML = base.length ? `${int(inView().length)} of ${int(base.length)} outlets in view` : "";
+      return;
+    }
+    el.innerHTML = head + dims().map(([k, label]) => {
       const counts = new Map();
       base.forEach((o) => { if (matches(o, k)) counts.set(o.dim[k], (counts.get(o.dim[k]) || 0) + 1); });
       S.filters[k].forEach((v) => { if (!counts.has(v)) counts.set(v, 0); });
@@ -252,6 +273,7 @@
           </div></div>` : ""}
       </div>`;
     }).join("");
+    $("[data-ftoggle]", el).onclick = toggleFilters;
     $$("[data-ms]", el).forEach((b) => b.addEventListener("click", () => { S.openDim = S.openDim === b.dataset.ms ? null : b.dataset.ms; renderFilters(); }));
     const panel = $(".ms-panel", el);
     if (panel) {
@@ -2054,6 +2076,8 @@
     if (NET_PAGES.has(S.page)) render(); // charts resolve colour tokens when drawn
   });
   $("#resetBtn").addEventListener("click", () => { DIMS.concat(NET_DIMS).forEach(([k]) => S.filters[k].clear()); S.bands.clear(); S.on.drill = null; changed(); });
+  applyRail();
+  $("#railBtn").addEventListener("click", () => { UI.railHidden = !UI.railHidden; saveUI(); applyRail(); });
   $("#menuBtn").addEventListener("click", () => { $("#rail").classList.add("open"); $("#scrim").hidden = false; });
   $("#scrim").addEventListener("click", () => { closeDrawer(); closeRail(); });
   $("#drawerClose").addEventListener("click", closeDrawer);
