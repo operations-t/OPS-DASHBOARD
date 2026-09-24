@@ -10,10 +10,12 @@ else
   : > /etc/nginx/auth.conf
 fi
 
-# Refresh loop: download Drive folders and rebuild data.json. A failed run keeps the last good data.
+# Refresh loop: download Drive folders and rebuild data.json and network.json.
+# A failed run keeps the last good data.
 (
   while true; do
     python3 /app/scripts/build_data.py || echo "Refresh failed; keeping the last good data."
+    python3 /app/scripts/network/refresh.py || echo "Outlet network refresh failed; keeping the last good data."
     sleep $(( ${REFRESH_MINUTES:-60} * 60 ))
   done
 ) &

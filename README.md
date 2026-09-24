@@ -1,10 +1,10 @@
 # Operations Dashboard
 
-Sales achievement and growth visibility for Shwapno operations, fed automatically from three Google Drive folders.
+Sales achievement and growth visibility for Shwapno operations, fed automatically from four Google Drive folders.
 
 ## How the data gets in
 
-GitHub downloads the files from the three public Drive folders every hour (8 am to 11 pm Dhaka time), reads them by their content, and saves `data/data.json`. The site only reads that file. No API key is used.
+GitHub downloads the files from the public Drive folders every hour (8 am to 11 pm Dhaka time), reads them by their content, and saves `data/data.json`. The site only reads that file. No API key is used.
 
 | Drive folder | What goes in it | Rule |
 |---|---|---|
@@ -15,6 +15,19 @@ GitHub downloads the files from the three public Drive folders every hour (8 am 
 Filenames don't matter. Every folder must stay shared as "Anyone with the link", and each folder can hold at most 50 files.
 
 If a file is broken or missing, the refresh is rejected and the site keeps the last good data. The Data quality page lists every problem found.
+
+### Outlet network and Growth & momentum
+
+These two pages are built into this dashboard and read `data/network.json`, which the same hourly refresh builds from a fourth folder, the [outlet network Drive folder](https://drive.google.com/drive/folders/1mcEmZg6DV0xQzWImuNyZFPhfg4oc0YTB). Put these workbooks directly in it (sub-folders are ignored, so an `Old` folder can hold last month's files):
+
+| Workbook | How it is recognised | Required |
+|---|---|---|
+| Outlet master / Zone Distribution | `CODE` + `Outlet Name` header with `Leader` / `Zonal` / `Format` columns | yes |
+| Day-wise target | `Outlet Code` + `Outlet Name` header followed by daily date columns | yes |
+| Day-wise sales | `Outlet Code` + `Date` + `POS NSI` | yes |
+| Last month (SPLY) | a sheet named `SPLY-ALL (…)` with `Code` and `SALES THIS` | optional |
+
+Keep one workbook of each kind; if there are two, the standard name (`zone-distribution.xlsx`, `day-wise-target.xlsx`, `day-wise-sales.xlsx`, `last-month.xlsx`) wins, then the newest. Without a last-month workbook every last-month figure shows as —. The month-end projection is actual sales to date plus separate average-sales forecasts for the remaining Fridays, Saturdays and Sunday–Thursday days, and month-on-month growth is measured only on outlets that have a last-month figure. A failed network refresh never blocks `data.json`; the pages keep the last good `network.json`.
 
 ## First-time setup on GitHub
 
@@ -45,6 +58,7 @@ Coolify: press **Restart** on the application; the refresh runs at start-up.
 
 - `index.html`, `assets/` — the site
 - `scripts/build_data.py` — downloads and reads the Drive files (run `python scripts/build_data.py --local <folder>` to test with local copies in `tilldate/`, `monthend/`, `performance/` subfolders)
+- `scripts/network/refresh.py` — downloads the outlet network folder and builds `data/network.json` (standard library only)
 - `.github/workflows/refresh-data.yml` — the hourly refresh
-- `data/data.json` — generated data (don't edit by hand)
+- `data/data.json`, `data/network.json`, `data/network-sync.json` — generated data (don't edit by hand)
 - `Dockerfile`, `deploy/` — Coolify / Docker packaging (nginx + hourly refresh + optional login)

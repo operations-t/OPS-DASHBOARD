@@ -7,6 +7,8 @@
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>">
 <link rel="stylesheet" href="assets/styles.css">
 <link rel="stylesheet" href="assets/ui-updates.css?v=cdf6b8fc88">
+<link rel="stylesheet" href="assets/network.css?v=net1">
+<link rel="stylesheet" href="assets/report.css?v=net1">
 <script>try{var t=localStorage.getItem('opsdash-theme');if(t)document.documentElement.dataset.theme=t;}catch(e){}</script>
 </head>
 <body>
@@ -37,6 +39,17 @@
   <header class="drawer-head"><h2 id="drawerTitle"></h2><button class="btn" id="drawerClose">Close</button></header>
   <div class="drawer-body" id="drawerBody"></div>
 </aside>
-<script src="assets/app.js?v=395fa5a339"></script>
+<div id="reportOverlay" role="dialog" aria-modal="true" aria-label="Regional head summary report">
+  <div class="report-toolbar">
+    <div><h2>Regional head summary report</h2><p id="reportMeta"></p></div>
+    <span class="spacer"></span>
+    <span class="report-busy" id="reportBusy" hidden>Rendering image…</span>
+    <button class="btn primary" id="reportPrint" type="button">Print or save as PDF</button>
+    <button class="btn" id="reportPng" type="button">Download PNG</button>
+    <button class="btn" id="reportClose" type="button">Close</button>
+  </div>
+  <div class="report-sheet" id="reportSheet"></div>
+</div>
+<script src="assets/app.js?v=net1"></script>
 </body>
 </html>

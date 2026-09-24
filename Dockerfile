@@ -7,7 +7,8 @@ RUN apk add --no-cache python3 py3-pip openssl tzdata \
 
 ENV TZ=Asia/Dhaka \
     REFRESH_MINUTES=60 \
-    DATA_OUT=/usr/share/nginx/html/data/data.json
+    DATA_OUT=/usr/share/nginx/html/data/data.json \
+    NETWORK_OUT=/usr/share/nginx/html/data/network.json
 
 COPY index.html /usr/share/nginx/html/
 COPY assets /usr/share/nginx/html/assets

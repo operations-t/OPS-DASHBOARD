@@ -1,4 +1,4 @@
-/* Operations Dashboard — phase 1 (Overview, Sales achievement, Data quality, embedded views) */
+/* Operations Dashboard — sales, performance, outlet network, growth & momentum, data quality, embedded views */
 (() => {
   "use strict";
   const $ = (s, r = document) => r.querySelector(s);
@@ -16,17 +16,18 @@
   const TITLES = Object.fromEntries(NAV.flatMap((g) => g.items.map(([k, t]) => [k, t])));
   const SALES_PAGES = new Set(["overview", "achievement", "growth", "footfall", "ranking"]);
   const PERIOD_PAGES = new Set([...SALES_PAGES, "category"]);
-  const FILTER_PAGES = new Set([...SALES_PAGES, "loss"]);
+  const NET_PAGES = new Set(["gm", "on"]);
+  const FILTER_PAGES = new Set([...SALES_PAGES, "loss", ...NET_PAGES]);
   const EMBEDS = {
     av: { url: "https://operations-t.github.io/AV/", desc: "Core, KVI, promo and e-commerce availability by outlet and SKU." },
     cw: { url: "https://operations-t.github.io/consumable-wastage-n/", desc: "Consumable and wastage cost against target by outlet." },
-    gm: { url: "https://operations-t.github.io/outlet-network-dashboard/insights.html", desc: "Momentum quadrant, top movers, trading-day heatmap, month trajectory and leadership league table." },
-    on: { url: "https://operations-t.github.io/outlet-network-dashboard/index.html", desc: "Outlet network by region, zone, format and opening date." },
     gpva: { url: "https://outlet-wise-gpva.shwapno.app/", desc: "Outlet-wise GPVA% tracking." },
     cc: { url: "https://aftabz-lab.github.io/credit-card-extra-amount/", desc: "Credit card extra amount by outlet." },
     vc: { url: "https://aftabz-lab.github.io/visit-compliance-dashboard/", desc: "Outlet visit schedules and compliance." },
   };
   const DIMS = [["rl", "Regional leader"], ["zn", "Zonal"], ["div", "Division"], ["dis", "District"], ["fmt", "Outlet format"], ["own", "Ownership"], ["pnp", "PNP status"], ["loc", "Location type"]];
+  // Extra outlet-master fields, filterable on the outlet network pages only.
+  const NET_DIMS = [["area", "Area"], ["city", "Location type (Dv, Ds, T)"], ["floor", "Floor type"], ["shape", "Layout shape"]];
   const LEVELS = [["rl", "Regional leader"], ["zn", "Zonal"], ["div", "Division"], ["dis", "District"], ["fmt", "Outlet format"], ["own", "Ownership"], ["outlet", "Outlet"]];
   const BANDS = [
     { k: "b100", label: "100% or more", cls: "good", min: 1 },
@@ -36,8 +37,13 @@
   ];
 
   const S = { data: null, page: "overview", period: "tilldate", filters: {}, openDim: null, tables: {}, level: "rl", bands: new Set(), lastFocus: null,
-    cmp: "y", scope: "all", trend: "all", kp: null, kl: "rho", kv: "rank", pm: null, pbasis: "after", pstat: "all", plevel: "rl", ageDrill: null };
-  DIMS.forEach(([k]) => (S.filters[k] = new Set()));
+    cmp: "y", scope: "all", trend: "all", kp: null, kl: "rho", kv: "rank", pm: null, pbasis: "after", pstat: "all", plevel: "rl", ageDrill: null,
+    net: null, netLoading: false, netErr: null, netMode: "through", netFrom: "", netTo: "",
+    on: { league: "regionalHead", oversight: "regional", launch: "year", cols: "key", drill: null },
+    gm: { quad: "regionalHead", mover: "regionalHead", dir: "gain", league: "regionalHead" } };
+  DIMS.concat(NET_DIMS).forEach(([k]) => (S.filters[k] = new Set()));
+  const dims = () => (NET_PAGES.has(S.page) ? DIMS.concat(NET_DIMS) : DIMS);
+  let AFTER = [];
 
   // ------------------------------------------------------------------ format
   const isNum = (v) => typeof v === "number" && isFinite(v);
@@ -87,8 +93,8 @@
     };
   }
   const rep = () => S.data?.[S.period];
-  const matches = (o, skip) => DIMS.every(([k]) => k === skip || !S.filters[k].size || S.filters[k].has(o.dim[k]));
-  const baseList = () => (S.page === "loss" ? pnlList() : rep()?.outlets || []);
+  const matches = (o, skip) => dims().every(([k]) => k === skip || !S.filters[k].size || S.filters[k].has(o.dim[k]));
+  const baseList = () => (NET_PAGES.has(S.page) ? netRows() : S.page === "loss" ? pnlList() : rep()?.outlets || []);
   const inView = () => baseList().filter((o) => matches(o));
   function pnlList() {
     const P = S.data?.pnl;
@@ -186,7 +192,7 @@
     el.innerHTML = `
       <div class="panel-head"><div><h2>${esc(sp.title)}</h2><p>${esc(sp.desc(rows.length))}</p></div>
         <div class="panel-tools">${sp.tools || ""}<input class="search" type="search" placeholder="Search" aria-label="Search table" data-tsearch="${id}" value="${esc(t.q)}"><button class="btn" data-csv="${id}">Download CSV</button></div></div>
-      <div class="table-wrap"><table><thead><tr>${th}</tr></thead><tbody>${body}</tbody></table></div>
+      ${sp.banner || ""}<div class="table-wrap"><table><thead><tr>${th}</tr></thead><tbody>${body}</tbody></table></div>
       ${rows.length > size ? `<div class="pager"><span>Showing ${int((t.page - 1) * size + 1)}–${int(Math.min(t.page * size, rows.length))} of ${int(rows.length)}</span><div><button class="btn" data-pg="-1" ${t.page === 1 ? "disabled" : ""}>Previous</button><span>Page ${t.page} of ${pages}</span><button class="btn" data-pg="1" ${t.page === pages ? "disabled" : ""}>Next</button></div></div>` : ""}`;
     $$("[data-sort]", el).forEach((b) => b.addEventListener("click", () => {
       const k = b.dataset.sort;
@@ -204,11 +210,12 @@
   function csv(id, rows) {
     const sp = S.tables[id].spec;
     const q = (v) => { const s = v == null ? "" : String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
-    const lines = [sp.cols.map((c) => q(c.label)).join(",")].concat(rows.map((r) => sp.cols.map((c) => q(c.csv ? c.csv(r) : r[c.k])).join(",")));
+    const cols = sp.csvCols || sp.cols;
+    const lines = [cols.map((c) => q(c.csvLabel || c.label)).join(",")].concat(rows.map((r) => cols.map((c) => q(c.csv ? c.csv(r) : r[c.k])).join(",")));
     const blob = new Blob(["\ufeff" + lines.join("\n")], { type: "text/csv;charset=utf-8" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = `${sp.file}_${rep()?.date || "data"}.csv`;
+    a.download = `${sp.file}_${sp.stamp || rep()?.date || "data"}.csv`;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   }
@@ -226,7 +233,7 @@
     const same = prevDim === S.openDim;
     const keepScroll = same ? el.querySelector(".ms-list")?.scrollTop || 0 : 0;
     const keepQ = same ? el.querySelector(".ms-panel input")?.value || "" : "";
-    el.innerHTML = `<h2>Filters</h2>` + DIMS.map(([k, label]) => {
+    el.innerHTML = `<h2>Filters</h2>` + dims().map(([k, label]) => {
       const counts = new Map();
       base.forEach((o) => { if (matches(o, k)) counts.set(o.dim[k], (counts.get(o.dim[k]) || 0) + 1); });
       S.filters[k].forEach((v) => { if (!counts.has(v)) counts.set(v, 0); });
@@ -261,7 +268,7 @@
   }
   function renderPills() {
     const pills = [];
-    DIMS.forEach(([k, label]) => S.filters[k].forEach((v) => pills.push(`<span class="filter-pill">${esc(label)}: ${esc(v)}<button aria-label="Remove ${esc(v)}" data-k="${k}" data-v="${esc(v)}">×</button></span>`)));
+    dims().forEach(([k, label]) => S.filters[k].forEach((v) => pills.push(`<span class="filter-pill">${esc(label)}: ${esc(v)}<button aria-label="Remove ${esc(v)}" data-k="${k}" data-v="${esc(v)}">×</button></span>`)));
     $("#pills").innerHTML = pills.join("");
     $$("#pills button").forEach((b) => b.addEventListener("click", () => { S.filters[b.dataset.k].delete(b.dataset.v); changed(); }));
   }
@@ -276,6 +283,12 @@
       $$("#periodSeg button").forEach((b) => b.addEventListener("click", () => { S.period = b.dataset.period; changed(); }));
       const g = new Date(d.generated);
       $("#fresh").textContent = "Data updated " + g.toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Dhaka" }).replace("Sept", "Sep");
+      if (NET_PAGES.has(S.page)) {
+        const n = S.net;
+        if (n && driveNote()) $("#fresh").textContent = "Drive data " + driveNote();
+        $("#scope").textContent = n ? `${fmonth(n.month)}, sales through ${fdate(S.netTo)}. ${int(inView().length)} of ${int(baseList().length)} outlets in view.` : "";
+        return;
+      }
       const r = rep();
       $("#scope").textContent = S.page === "loss" && d.pnl ? `Outlet P&L for ${S.pm === "ytd" ? "the year to date" : fmonth(S.pm || d.pnl.months[d.pnl.months.length - 1])}. ${int(inView().filter((o) => o.s >= 1).length)} trading outlets in view.` : showP && r ? `${r.closed ? "Closed month" : "Month to date"}, ${r.splm_label?.replace(/^Same Day SPLM\s*/i, "") || fdate(r.date)}.${SALES_PAGES.has(S.page) ? ` ${int(inView().length)} outlets in view.` : " Company-wide figures."}` : "";
     }
@@ -409,6 +422,7 @@
         </tbody></table></div></section>
       <section class="panel"><div class="panel-head"><div><h2>Checks from the last refresh</h2><p>${d.issues.filter((i) => i.level === "error").length} problems, ${d.issues.filter((i) => i.level === "warn").length} warnings</p></div></div>
         <div class="panel-body">${d.issues.map((i) => `<div class="issue"><span>${chip({ cls: lvl[i.level], label: name[i.level] })}</span><div>${esc(i.message)}<small>${esc(i.source)}</small></div></div>`).join("") || '<p class="muted">All checks passed.</p>'}</div></section>
+      ${netFilesPanel()}
       <section class="panel"><div class="panel-head"><div><h2>How updates work</h2></div></div>
         <div class="panel-body"><p style="margin:0;max-width:72ch">Upload or replace a file in its Google Drive folder. The dashboard checks the folders every hour between 8 am and 11 pm and refreshes on its own. To refresh straight away, open the repository on GitHub, go to Actions, choose "Refresh data" and press "Run workflow". If a file is broken, the dashboard keeps the last good data and the problem appears on this page.</p></div></section>`;
   }
@@ -454,6 +468,7 @@
     $$("[data-set]", root).forEach((b) => (b.onclick = () => { S[b.dataset.set] = b.dataset.val; changed(); }));
     $$("[data-sel]", root).forEach((sel) => (sel.onchange = () => { S[sel.dataset.sel] = sel.value; changed(); }));
     $$("[data-go]", root).forEach((b) => (b.onclick = () => (location.hash = b.dataset.go)));
+    wireNet(root);
   }
 
   // ------------------------------------------------------------------ sales growth
@@ -897,6 +912,1075 @@
     showDrawer();
   }
 
+  // ------------------------------------------------------------------ outlet network (Outlet network + Growth & momentum)
+  // data/network.json is built by scripts/network/refresh.py from the outlet-network Drive folder
+  // (outlet master, day-wise target, day-wise sales, last-month SPLY). It is loaded on first visit.
+  const NET_MISS = "Not recorded";
+  const nnum = (v) => (isNum(v) ? v : null);
+  const disp = (v) => (v == null || String(v).trim() === "" ? "—" : String(v).trim());
+  const nsum = (list, k) => list.reduce((s, r) => s + (nnum(r[k]) || 0), 0);
+  function compact(v) {
+    if (!isNum(v)) return "—";
+    const a = Math.abs(v), s = v < 0 ? "−" : "", f = (x, d) => Number(x.toFixed(d)).toString();
+    return a >= 1e7 ? s + f(a / 1e7, 2) + " Cr" : a >= 1e5 ? s + f(a / 1e5, 2) + " Lac" : a >= 1e4 ? s + f(a / 1e3, 1) + " K" : s + Math.round(a).toLocaleString("en-US");
+  }
+  const spct = (v, d = 1) => (isNum(v) ? (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v * 100).toFixed(d) + "%" : "—");
+  const npct = (v, d = 0) => (isNum(v) ? (v * 100).toFixed(d) + "%" : "—");
+  // 99.8% must not print as 100% next to a "Watch" chip.
+  const pct0 = (v) => { if (!isNum(v)) return "—"; const r = Math.round(v * 100); return (v < 1 && r >= 100) || (v > 1 && r <= 100) ? (v * 100).toFixed(1) + "%" : r + "%"; };
+  const signed = (v) => (isNum(v) && v > 0 ? "+" : "") + bdt(v);
+  const pn = (v) => (isNum(v) ? (v >= 0 ? "pos" : "neg") : "muted");
+  const perfTone = (a) => (!isNum(a) ? { key: "idle", label: "No target" } : a >= 1 ? { key: "good", label: "On target" } : a >= 0.95 ? { key: "warn", label: "Watch" } : { key: "bad", label: "Below target" });
+  const growthTone = (g) => (!isNum(g) ? { key: "idle", label: "No base" } : g >= 0.02 ? { key: "good", label: "Growing" } : g >= -0.02 ? { key: "warn", label: "Flat" } : { key: "bad", label: "Declining" });
+  const tchip = (t, label) => `<span class="chip ${t.key}">${esc(label || t.label)}</span>`;
+  const ratePair = (v) => (isNum(v) ? `<span class="rate-pair"><strong>${pct0(v)}</strong>${tchip(perfTone(v))}</span>` : '<span class="muted">—</span>');
+  const pcsv1 = (v) => (isNum(v) ? (v * 100).toFixed(1) + "%" : "");
+  const rnd = (v) => (isNum(v) ? Math.round(v) : "");
+
+  // ---- projection maths (unchanged from the outlet network dashboard)
+  const monthDays = (d) => { const [y, m] = d.split("-").map(Number); return new Date(Date.UTC(y, m, 0)).getUTCDate(); };
+  const dayGroup = (d) => { const w = new Date(d + "T00:00:00Z").getUTCDay(); return w === 5 ? "friday" : w === 6 ? "saturday" : "other"; };
+  const mean = (a) => (a.length ? a.reduce((s, v) => s + v, 0) / a.length : null);
+  const owns = (o, k) => Object.prototype.hasOwnProperty.call(o || {}, k);
+  // Actual sales to date plus separate average-sales forecasts for the remaining Fridays, Saturdays and Sun–Thu days.
+  function projectMonthEnd(acts, tgts, through, days) {
+    const month = through.slice(0, 7);
+    const seen = Object.keys(acts || {}).filter((d) => d.startsWith(month) && d <= through).sort();
+    if (!seen.length) return null;
+    const toDate = seen.reduce((s, d) => s + (nnum(acts[d]) || 0), 0);
+    const rest = [];
+    for (let day = Number(through.slice(-2)) + 1; day <= days; day++) rest.push(month + "-" + String(day).padStart(2, "0"));
+    if (!rest.length) return toDate;
+    const byGroup = { friday: [], saturday: [], other: [] };
+    seen.forEach((d) => byGroup[dayGroup(d)].push(nnum(acts[d]) || 0));
+    const overall = toDate / seen.length;
+    const seenTarget = seen.reduce((s, d) => s + (owns(tgts, d) ? nnum(tgts[d]) || 0 : 0), 0);
+    const perf = seenTarget ? toDate / seenTarget : null;
+    const avgs = {};
+    Object.keys(byGroup).forEach((g) => {
+      const actual = mean(byGroup[g]);
+      if (actual !== null) { avgs[g] = actual; return; }
+      const t = mean(rest.filter((d) => dayGroup(d) === g && owns(tgts, d)).map((d) => nnum(tgts[d]) || 0));
+      avgs[g] = t !== null && perf !== null ? t * perf : overall;
+    });
+    return toDate + rest.reduce((s, d) => s + avgs[dayGroup(d)], 0);
+  }
+  function calcNet(base, through, from) {
+    if (!through) return base.map((r) => ({ ...r }));
+    const days = monthDays(through), month = through.slice(0, 7);
+    const start = from && from.slice(0, 7) === month ? from : month + "-01";
+    return base.map((r) => {
+      const tg = r.dailySalesTargets || {}, ac = r.dailySalesActuals || {};
+      const tDates = Object.keys(tg).filter((d) => d.startsWith(month)), aDates = Object.keys(ac).filter((d) => d.startsWith(month));
+      const monthlyTarget = tDates.length ? tDates.reduce((s, d) => s + (nnum(tg[d]) || 0), 0) : nnum(r.monthlyTarget);
+      const targetToDate = tDates.length ? tDates.filter((d) => d >= start && d <= through).reduce((s, d) => s + (nnum(tg[d]) || 0), 0) : nnum(r.targetToDate);
+      const salesToDate = aDates.length ? aDates.filter((d) => d >= start && d <= through).reduce((s, d) => s + (nnum(ac[d]) || 0), 0) : nnum(r.salesToDate);
+      const projectedSales = aDates.length ? projectMonthEnd(ac, tg, through, days) : nnum(r.projectedSales);
+      const lastMonthSales = nnum(r.lastMonthSales);
+      return {
+        ...r, targetToDate, monthlyTarget, salesToDate, projectedSales, lastMonthSales,
+        salesGapToDate: salesToDate !== null && targetToDate !== null ? salesToDate - targetToDate : null,
+        salesAchievement: salesToDate !== null && targetToDate ? salesToDate / targetToDate : null,
+        projectedGap: projectedSales !== null && monthlyTarget !== null ? projectedSales - monthlyTarget : null,
+        projectedAchievement: projectedSales !== null && monthlyTarget ? projectedSales / monthlyTarget : null,
+        // Month-on-month compares the projected full month against last month's full-month actual.
+        momGrowth: projectedSales !== null && lastMonthSales ? projectedSales / lastMonthSales - 1 : null,
+        projectedVsLastMonth: projectedSales !== null && lastMonthSales !== null ? projectedSales - lastMonthSales : null,
+      };
+    });
+  }
+
+  // ---- data
+  function loadNet() {
+    if (S.net || S.netLoading) return;
+    S.netLoading = true; S.netErr = null;
+    fetch("data/network.json", { cache: "no-cache" })
+      .then((r) => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+      .then((d) => { prepNet(d); S.net = d; })
+      .catch((e) => { S.netErr = e.message; })
+      .finally(() => { S.netLoading = false; if (NET_PAGES.has(S.page) || S.page === "dq") render(); });
+  }
+  function prepNet(d) {
+    const rows = Array.isArray(d.rows) ? d.rows : [];
+    const v = (x) => (x == null || String(x).trim() === "" ? NET_MISS : String(x).trim());
+    const all = new Set(), act = new Set();
+    rows.forEach((r) => {
+      const st = String(r.status || "").trim();
+      r.status = /^own/i.test(st) ? "Own" : /^fr/i.test(st) ? "Franchise" : st;
+      r.c = r.code; r.nm = r.outletName || r.code;
+      r.dim = { rl: v(r.leader || r.regionalHead), zn: v(r.zonal), div: v(r.division), dis: v(r.district), fmt: v(r.format), own: v(r.status), pnp: v(r.pnpStatus),
+        loc: v(r.locationType), area: v(r.area), city: v(r.cityType), floor: v(r.floorType), shape: v(r.layoutShape) };
+      Object.keys(r.dailySalesTargets || {}).forEach((x) => all.add(x));
+      Object.keys(r.dailySalesActuals || {}).forEach((x) => { all.add(x); act.add(x); });
+    });
+    const iso = (x) => /^\d{4}-\d{2}-\d{2}$/.test(x);
+    const ds = [...all].filter(iso).sort(), as = [...act].filter(iso).sort();
+    const src = d.source || {};
+    d.rows = rows;
+    d.min = ds[0] || "";
+    d.max = as[as.length - 1] || ds[ds.length - 1] || "";
+    d.month = src.reportMonth || d.meta?.reportMonth || d.max.slice(0, 7);
+    d.lm = src.lastMonth?.monthLabel || src.previousMonthLabel || "Last month";
+    d.rhKey = rows.some((r) => disp(r.regionalHead) !== "—") ? "regionalHead" : "leader";
+    d.present = REG_ORDER.filter((k) => REG_ALWAYS.includes(k) || rows.some((r) => r[k] != null && String(r[k]).trim() !== ""));
+    S.netTo = d.max;
+    const ms = d.max ? d.max.slice(0, 8) + "01" : "";
+    S.netFrom = ms && ms < d.min ? d.min : ms;
+  }
+  let netCache = { key: null, rows: [] };
+  function netRows() {
+    if (!S.net) return [];
+    const range = S.page === "on" && S.netMode === "range";
+    const key = `${S.netTo}|${range ? S.netFrom : ""}`;
+    if (netCache.key !== key) netCache = { key, rows: calcNet(S.net.rows, S.netTo, range ? S.netFrom : "") };
+    return netCache.rows;
+  }
+  const netLM = () => S.net?.lm || "Last month";
+  function netGuard() {
+    if (S.net) return "";
+    loadNet();
+    return S.netErr
+      ? `<p class="empty">The outlet network data could not be loaded (${esc(S.netErr)}). Run the "Refresh data" workflow on GitHub, then reload this page.</p>`
+      : '<p class="empty">Loading outlet network data…</p>';
+  }
+  function driveNote() {
+    const at = S.net?.source?.drive?.syncedAt;
+    const d = at ? new Date(at) : null;
+    return d && !isNaN(d) ? d.toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Dhaka" }).replace("Sept", "Sep") : "";
+  }
+
+  // ---- grouping. Growth and change are measured only on outlets that have a last-month baseline,
+  // so newly opened outlets never read as growth.
+  const NET_LEVELS = { regionalHead: "Regional head", zonal: "Zonal", division: "Division", district: "District", format: "Format", area: "Area", outlet: "Outlet" };
+  const netKey = (level) => (level === "regionalHead" ? S.net.rhKey : level);
+  const outletLabel = (r) => (disp(r.outletName) === "—" ? disp(r.code) : `${disp(r.code)} · ${disp(r.outletName)}`);
+  function netGroup(list, level, keepRows) {
+    const m = new Map(), key = level === "outlet" ? null : netKey(level);
+    list.forEach((r) => {
+      const name = level === "outlet" ? outletLabel(r) : disp(r[key]);
+      if (name === "—") return;
+      const id = level === "outlet" ? r.code : name;
+      let x = m.get(id);
+      if (!x) m.set(id, (x = { name, sub: "", code: level === "outlet" ? r.code : null, outlets: 0, target: 0, actual: 0, monthlyTarget: 0, projected: 0, lastMonth: 0, projOnBase: 0, hasBase: 0, rows: [] }));
+      x.outlets++;
+      x.target += nnum(r.targetToDate) || 0; x.actual += nnum(r.salesToDate) || 0;
+      x.monthlyTarget += nnum(r.monthlyTarget) || 0; x.projected += nnum(r.projectedSales) || 0;
+      if (nnum(r.lastMonthSales) !== null) { x.lastMonth += r.lastMonthSales; x.projOnBase += nnum(r.projectedSales) || 0; x.hasBase++; }
+      if (keepRows) x.rows.push(r);
+      if (level === "outlet") x.sub = [disp(r.leader || r.regionalHead), disp(r.division)].filter((s) => s !== "—").join(" · ");
+    });
+    return [...m.values()].map((x) => {
+      if (level !== "outlet") x.sub = `${int(x.outlets)} outlet${x.outlets === 1 ? "" : "s"}`;
+      x.achievement = x.target ? x.actual / x.target : null;
+      x.projectedAchievement = x.monthlyTarget ? x.projected / x.monthlyTarget : null;
+      x.mom = x.lastMonth ? x.projOnBase / x.lastMonth - 1 : null;
+      x.delta = x.lastMonth ? x.projOnBase - x.lastMonth : null;
+      return x;
+    });
+  }
+  function countBy(list, get) {
+    const m = new Map();
+    list.forEach((r) => { const v = get(r); if (v && v !== "—") m.set(v, (m.get(v) || 0) + 1); });
+    return [...m.entries()].map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value || a.label.localeCompare(b.label));
+  }
+  function baseTotals(list) {
+    const withBase = list.filter((r) => nnum(r.lastMonthSales) !== null);
+    const lastTotal = withBase.reduce((s, r) => s + r.lastMonthSales, 0);
+    const projOnBase = withBase.reduce((s, r) => s + (nnum(r.projectedSales) || 0), 0);
+    return { withBase, lastTotal, projOnBase, growth: lastTotal ? projOnBase / lastTotal - 1 : null, change: lastTotal ? projOnBase - lastTotal : null };
+  }
+
+  // ---- shared bits: drill-to-register, CSV, segmented controls, hero card, charts
+  const NDRILL = new Map();
+  let ndSeq = 0;
+  const ndrill = (fn) => { const id = "n" + ++ndSeq; NDRILL.set(id, fn); return `data-ndrill="${id}"`; };
+  const dbtn = (label, title, fn) => `<button class="drill" type="button" title="${esc(title)}" ${ndrill(fn)}>${esc(label)}</button>`;
+  function setDrill(label, values, get) {
+    const want = new Set(values.map((x) => String(x).toLowerCase()));
+    S.on.drill = { label, values, test: (r) => want.has(String(get(r)).toLowerCase()) };
+    if (S.tables["on-reg"]) S.tables["on-reg"].page = 1;
+    render();
+    requestAnimationFrame(() => $("#t-on-reg")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  }
+  const levelDrill = (level, name) => { const key = netKey(level); setDrill(NET_LEVELS[level], [name], (r) => disp(r[key])); };
+  const NCSV = {};
+  function saveCsv(name, header, rows) {
+    const q = (v) => { const s = v == null ? "" : String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+    const blob = new Blob(["﻿" + [header].concat(rows).map((r) => r.map(q).join(",")).join("\n")], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `${name}_${S.netTo || "data"}.csv`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+  const csvBtn = (k) => `<button class="btn" data-ncsv="${k}">Download CSV</button>`;
+  // path like "on.league" → S.on.league
+  const nseg = (path, opts, label) => { const [a, b] = path.split("."); return `<div class="seg" role="group" aria-label="${esc(label)}">${opts.map(([v, t]) => `<button data-nset="${path}" data-val="${v}" aria-pressed="${S[a][b] === v}">${esc(t)}</button>`).join("")}</div>`; };
+  function netHero(o) {
+    const scaleMax = Math.max(1.2, isNum(o.ratio) ? Math.min(o.ratio, 2) : 0);
+    const fill = isNum(o.ratio) ? (Math.min(o.ratio, scaleMax) / scaleMax) * 100 : 0;
+    return `<div class="kpi hero net-hero" style="--accent:var(--series-2)">
+      <div class="hero-grid"><div class="hero-figure"><span class="label">${esc(o.label)}</span><span class="value" title="${esc(o.title || "")}">${o.value}</span><span class="sub">${o.sub}</span></div>
+      <dl class="hero-rows">${o.rows.map(([dt, dd, cls]) => `<div class="hero-row"><dt>${esc(dt)}</dt><dd class="${cls || ""}">${dd}</dd></div>`).join("")}</dl></div>
+      <div class="meter" role="img" aria-label="${esc(o.aria)}"><i class="${isNum(o.ratio) ? o.tone.key : ""}" style="width:${fill.toFixed(1)}%"></i><b style="left:${(100 / scaleMax).toFixed(1)}%"></b></div>
+      <div class="meter-scale"><span>0</span><span>${esc(o.scale)}</span></div>
+      <span class="foot">${o.foot}</span></div>`;
+  }
+  const cssVar = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  // SVG presentation attributes don't reliably take var(), so charts resolve tokens and redraw on a theme switch.
+  function palette() { const memo = {}; return (n) => memo[n] || (memo[n] = cssVar(n) || "#888888"); }
+  const SVG_NS = "http://www.w3.org/2000/svg";
+  function svgEl(name, attrs = {}) {
+    const el = document.createElementNS(SVG_NS, name);
+    Object.entries(attrs).forEach(([k, v]) => { if (v != null) el.setAttribute(k, v); });
+    return el;
+  }
+  function readableInk(hex) {
+    const m = String(hex).trim().replace("#", ""), full = m.length === 3 ? m.split("").map((c) => c + c).join("") : m;
+    if (!/^[0-9a-f]{6}$/i.test(full)) return "#0a141c";
+    const [r, g, b] = [0, 2, 4].map((i) => { const c = parseInt(full.slice(i, i + 2), 16) / 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); });
+    const l = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    return 1.05 / (l + 0.05) >= (l + 0.05) / 0.05 ? "#ffffff" : "#0a141c";
+  }
+  let tipEl = null;
+  function showTip(evt, html) {
+    if (!tipEl) { tipEl = document.createElement("div"); tipEl.className = "viz-tooltip"; tipEl.setAttribute("role", "status"); document.body.append(tipEl); }
+    tipEl.innerHTML = html; tipEl.classList.add("is-visible");
+    const pad = 14, w = tipEl.offsetWidth, h = tipEl.offsetHeight;
+    let x = evt.clientX + pad, y = evt.clientY + pad;
+    if (x + w > innerWidth - 8) x = evt.clientX - w - pad;
+    if (y + h > innerHeight - 8) y = evt.clientY - h - pad;
+    tipEl.style.left = Math.max(8, x) + "px"; tipEl.style.top = Math.max(8, y) + "px";
+  }
+  const hideTip = () => tipEl?.classList.remove("is-visible");
+  const attachTip = (node, html) => { node.addEventListener("pointerenter", (e) => showTip(e, html())); node.addEventListener("pointermove", (e) => showTip(e, html())); node.addEventListener("pointerleave", hideTip); };
+  function dateControls(rangeAllowed) {
+    const d = S.net, range = rangeAllowed && S.netMode === "range";
+    const inp = (k, lbl, min, max) => `<label class="net-date">${lbl}<input type="date" data-ndate="${k}" value="${esc(S[k])}" min="${min}" max="${max}"></label>`;
+    const mode = `<div class="seg" role="group" aria-label="Sales period">${[["through", "Through date"], ["range", "Date range"]].map(([v, t]) => `<button data-nset="netm.mode" data-val="${v}" aria-pressed="${S.netMode === v}">${t}</button>`).join("")}</div>`;
+    return (rangeAllowed ? mode : "")
+      + (range ? inp("netFrom", "From", d.min, S.netTo) + inp("netTo", "To", S.netFrom, d.max) : inp("netTo", rangeAllowed ? "Month start through" : "Sales through", d.min, d.max));
+  }
+
+  // ---- Outlet network page
+  const REG_ORDER = ["code", "outletName", "targetToDate", "salesToDate", "salesGapToDate", "salesAchievement", "lastMonthSales", "momGrowth", "projectedVsLastMonth", "monthlyTarget", "projectedSales", "projectedGap", "projectedAchievement",
+    "leader", "rhoId", "rhoPhone", "zonal", "zonalId", "zonalPhone", "format", "division", "district", "cityType", "floorType", "layoutShape", "status", "pnpStatus", "sft", "launchDate", "locationType", "regionalHead", "area", "density", "incomeLevel"];
+  const REG_KEY = ["code", "targetToDate", "salesToDate", "salesAchievement", "lastMonthSales", "momGrowth", "monthlyTarget", "projectedSales", "projectedAchievement", "regionalHead", "zonal", "division", "format"];
+  const REG_ALWAYS = ["targetToDate", "salesToDate", "salesGapToDate", "salesAchievement", "lastMonthSales", "momGrowth", "projectedVsLastMonth", "monthlyTarget", "projectedSales", "projectedGap", "projectedAchievement"];
+  const REG_MONEY = ["salesToDate", "targetToDate", "salesGapToDate", "lastMonthSales", "projectedVsLastMonth", "monthlyTarget", "projectedSales", "projectedGap"];
+  const REG_PCT = ["salesAchievement", "projectedAchievement", "momGrowth"];
+  const REG_SIGNED = ["salesGapToDate", "projectedGap", "projectedVsLastMonth"];
+  const REG_LABELS = {
+    code: "Outlet", outletName: "Outlet name", targetToDate: "Target (TD)", salesToDate: "Actual (TD)", salesGapToDate: "Gap (TD)", salesAchievement: "Achievement (TD)", momGrowth: "MoM growth",
+    projectedVsLastMonth: "Projected vs last month", monthlyTarget: "Monthly target", projectedSales: "Projected", projectedGap: "Projected gap", projectedAchievement: "Projected ach.",
+    leader: "Leader", regionalHead: "Regional head", rhoId: "RHO ID", rhoPhone: "RHO phone", zonal: "Zonal", zonalId: "Zonal ID", zonalPhone: "Zonal phone", format: "Format", division: "Division", district: "District",
+    pnpStatus: "PNP status", status: "Store status", sft: "SFT", launchDate: "Launch date", locationType: "Location type", cityType: "Dv / Ds / T", floorType: "Floor type", layoutShape: "Layout shape",
+    area: "Area", density: "Density", incomeLevel: "Income level",
+  };
+  function regCol(k) {
+    const numeric = REG_MONEY.includes(k) || REG_PCT.includes(k) || k === "sft";
+    const label = k === "lastMonthSales" ? netLM() + " sales" : REG_LABELS[k] || k;
+    const col = { k, label, num: numeric ? 1 : 0, val: numeric ? (r) => nnum(r[k]) : (r) => disp(r[k]) };
+    if (k === "code") Object.assign(col, { val: (r) => r.code, csv: (r) => r.code, csvLabel: "Outlet Code",
+      fmt: (r) => `<span class="cell-primary">${esc(disp(r.code))}</span><span class="cell-secondary" title="${esc(disp(r.outletName))}">${esc(disp(r.outletName))}</span>` });
+    else if (REG_MONEY.includes(k)) Object.assign(col, { csv: (r) => rnd(r[k]),
+      fmt: (r) => { const n = nnum(r[k]), s = REG_SIGNED.includes(k); return `<span class="${s && n !== null ? pn(n) : ""}" title="${esc(exact(n))}">${s ? signed(n) : bdt(n)}</span>`; } });
+    else if (k === "momGrowth") Object.assign(col, { csv: (r) => pcsv1(r[k]), fmt: (r) => `<span class="${pn(nnum(r[k]))}">${spct(nnum(r[k]))}</span>` });
+    else if (REG_PCT.includes(k)) Object.assign(col, { csv: (r) => pcsv1(r[k]), fmt: (r) => ratePair(nnum(r[k])) });
+    else if (k === "sft") Object.assign(col, { csv: (r) => r.sft ?? "", fmt: (r) => (nnum(r.sft) ? int(r.sft) : "—") });
+    else if (k === "launchDate") Object.assign(col, { csv: (r) => r.launchDate || "", fmt: (r) => (r.launchDate ? fdate(r.launchDate) : "—") });
+    else Object.assign(col, { csv: (r) => r[k] ?? "", fmt: (r) => esc(disp(r[k])) });
+    return col;
+  }
+  function pageON() {
+    const g = netGuard(); if (g) return g;
+    NDRILL.clear();
+    const d = S.net, st = S.on, lm = netLM(), list = inView(), all = baseList();
+    const range = S.netMode === "range";
+    const periodLabel = range ? `${fdate(S.netFrom)} – ${fdate(S.netTo)}` : `1 – ${fdate(S.netTo)}`;
+
+    // sales performance
+    const t = nsum(list, "targetToDate"), a = nsum(list, "salesToDate"), mt = nsum(list, "monthlyTarget"), p = nsum(list, "projectedSales");
+    const b = baseTotals(list), ach = t ? a / t : null, pach = mt ? p / mt : null, gap = p - mt, tdGap = a - t;
+    const tdTone = perfTone(ach), pjTone = perfTone(pach), gTone = growthTone(b.growth);
+    NCSV.sales = () => ["outlet_network_sales", ["Measure", "Value"], [
+      ["Period", periodLabel], ["Outlets in view", list.length], ["Target till date", rnd(t)], ["Actual till date", rnd(a)], ["Gap till date", rnd(tdGap)],
+      ["Achievement till date", pcsv1(ach)], ["Monthly target", rnd(mt)], ["Projected month-end", rnd(p)], ["Projected gap", rnd(gap)], ["Projected achievement", pcsv1(pach)],
+      [`${lm} sales (outlets with a baseline)`, rnd(b.lastTotal)], ["Outlets with a baseline", b.withBase.length], ["Projected on baseline outlets", rnd(b.projOnBase)], ["MoM growth", pcsv1(b.growth)]]];
+    const sales = `<section class="panel"><div class="panel-head"><div><h2>Sales performance</h2><p>${range ? `Target and actual for ${fdate(S.netFrom)} to ${fdate(S.netTo)}. The month-end projection still uses actual sales from the 1st.` : `Month start through ${fdate(S.netTo)}, with the month-end projection.`}</p></div>
+      <div class="panel-tools">${dateControls(true)}${csvBtn("sales")}</div></div>
+      <div class="panel-body"><div class="kpis net-kpis">
+      ${netHero({ label: "Projected month-end", value: bdt(p || null), title: exact(p), sub: `${tchip(pjTone)} ${pct0(pach)} of monthly target`, ratio: pach, tone: pjTone, aria: `Projected ${pct0(pach)} of monthly target`, scale: "Target",
+        rows: [["Monthly target", bdt(mt || null)], ["Gap to target", mt ? signed(gap) : "—", gap >= 0 ? "pos" : "neg"], [`${lm} actual`, bdt(b.lastTotal || null)]],
+        foot: `<span>Friday, Saturday and Sun–Thu run rates</span><span>${int(list.length)} outlets</span>` })}
+      ${kpi({ label: "Actual till date", value: bdt(a || null), sub: tchip(tdTone, pct0(ach) + " · " + tdTone.label), foot: `<span>${esc(periodLabel)}</span>`, accent: "var(--series-2)" })}
+      ${kpi({ label: "Target till date", value: bdt(t || null), sub: `Gap <strong class="${tdGap >= 0 ? "pos" : "neg"}">${t ? signed(tdGap) : "—"}</strong>`, foot: "<span>Sum of daily targets in the period</span>", accent: "var(--line)" })}
+      ${kpi({ label: `${esc(lm)} sales`, value: bdt(b.lastTotal || null), sub: `${int(b.withBase.length)} of ${int(list.length)} outlets have a baseline`, foot: "<span>Full-month actual</span>", accent: "var(--series-3)" })}
+      ${kpi({ label: "Month on month", value: `<span class="${pn(b.growth)}">${spct(b.growth)}</span>`, sub: tchip(gTone), foot: `<span>${b.change === null ? "No baseline" : `${b.change >= 0 ? "▲" : "▼"} ${bdt(Math.abs(b.change))} projected vs ${esc(lm)}`}</span>`, accent: "var(--series-4)" })}
+      </div></div></section>`;
+
+    // network at a glance
+    const sfts = list.map((r) => nnum(r.sft)).filter((n) => n > 0), area = sfts.reduce((s, n) => s + n, 0);
+    const own = list.filter((r) => r.status === "Own"), pnp = list.filter((r) => String(r.pnpStatus).toUpperCase() === "PNP");
+    const launches = list.map((r) => r.launchDate).filter((x) => /^\d{4}-\d{2}-\d{2}$/.test(x || "")).sort();
+    const ly = launches.length ? launches[launches.length - 1].slice(0, 4) : null, lmo = launches.length ? launches[launches.length - 1].slice(0, 7) : null;
+    const yc = ly ? launches.filter((x) => x.startsWith(ly)).length : 0, mc = lmo ? launches.filter((x) => x.startsWith(lmo)).length : 0;
+    const share = (n) => pct0(list.length ? n / list.length : null) + " of outlets";
+    const glance = [
+      ["Outlets", int(list.length), "In the current view"],
+      ["Total floor area", compact(area), "sft across valid records"],
+      ["Average size", sfts.length ? int(area / sfts.length) : "—", "sft per outlet"],
+      ["Own stores", own.length ? dbtn(int(own.length), "List own stores", () => setDrill("Store status", ["Own"], (r) => r.status)) : "0", share(own.length)],
+      ["PNP outlets", pnp.length ? dbtn(int(pnp.length), "List PNP outlets", () => setDrill("PNP status", ["PNP"], (r) => String(r.pnpStatus).toUpperCase())) : "0", share(pnp.length)],
+      [`Opened in ${ly || "latest year"}`, yc ? dbtn(int(yc), `List outlets opened in ${ly}`, () => setDrill("Launch year", [ly], (r) => (r.launchDate || "").slice(0, 4))) : "—", "Latest launch year"],
+      [`Opened in ${lmo ? fmonth(lmo) : "latest month"}`, mc ? dbtn(int(mc), `List outlets opened in ${fmonth(lmo)}`, () => setDrill("Launch month", [lmo], (r) => (r.launchDate || "").slice(0, 7))) : "—", "Latest launch month"],
+    ];
+    const glanceHtml = `<section class="panel"><div class="panel-head"><div><h2>Network at a glance</h2><p>Blue figures open the matching outlets in the outlet register.</p></div></div>
+      <div class="stat-strip">${glance.map(([l, v, n]) => `<div><span>${esc(l)}</span><strong>${v}</strong><small>${esc(n)}</small></div>`).join("")}</div></section>`;
+
+    // actual vs target by level
+    const lvl = st.league, lvlName = NET_LEVELS[lvl];
+    const leagueRows = netGroup(list, lvl);
+    const league = mountTable("on-league", {
+      title: `Actual vs target by ${lvlName.toLowerCase()}`, file: `${lvl}_actual_vs_target`, stamp: S.netTo,
+      desc: (n) => `${int(n)} ${lvlName.toLowerCase()} groups. Click a row to list its outlets in the register. Group results are sums of their outlets, never averages of outlet percentages.`,
+      rows: leagueRows, key: (x) => x.name, searchText: (x) => x.name, defaultSort: "actual", pageSize: 25,
+      tools: `<select class="sel" data-nsel="on.league" aria-label="Level">${["regionalHead", "zonal", "division", "district", "format", "area"].map((k) => `<option value="${k}" ${lvl === k ? "selected" : ""}>${NET_LEVELS[k]}</option>`).join("")}</select>`,
+      rowAttr: (x) => `${ndrill(() => levelDrill(lvl, x.name))} tabindex="0" title="List ${esc(x.name)}'s outlets" style="cursor:pointer"`,
+      cols: [
+        { k: "name", label: lvlName, fmt: (x) => `<span class="cell-primary">${esc(x.name)}</span>`, csv: (x) => x.name },
+        { k: "outlets", label: "Outlets", num: 1, fmt: (x) => int(x.outlets) },
+        { k: "target", label: "Target (TD)", num: 1, fmt: (x) => bdt(x.target), csv: (x) => rnd(x.target) },
+        { k: "actual", label: "Actual (TD)", num: 1, fmt: (x) => `<strong>${bdt(x.actual)}</strong>`, csv: (x) => rnd(x.actual) },
+        { k: "achievement", label: "Achievement (TD)", num: 1, fmt: (x) => ratePair(x.achievement), csv: (x) => pcsv1(x.achievement) },
+        { k: "lastMonth", label: lm, num: 1, fmt: (x) => bdt(x.lastMonth || null), csv: (x) => rnd(x.lastMonth) },
+        { k: "monthlyTarget", label: "Monthly target", num: 1, fmt: (x) => bdt(x.monthlyTarget), csv: (x) => rnd(x.monthlyTarget) },
+        { k: "projected", label: "Projected", num: 1, fmt: (x) => `<strong>${bdt(x.projected)}</strong>`, csv: (x) => rnd(x.projected) },
+        { k: "projectedAchievement", label: "Projected ach.", num: 1, fmt: (x) => ratePair(x.projectedAchievement), csv: (x) => pcsv1(x.projectedAchievement) },
+        { k: "mom", label: "MoM growth", num: 1, fmt: (x) => `<span class="${pn(x.mom)}">${spct(x.mom)}</span>`, csv: (x) => pcsv1(x.mom) },
+      ],
+    });
+
+    // outlets overseen
+    const ovKey = st.oversight === "regional" ? "regionalHead" : "zonal", ovName = st.oversight === "regional" ? "Regional head" : "Zonal";
+    const ov = netGroup(list, ovKey).sort((x, y) => y.outlets - x.outlets || x.name.localeCompare(y.name));
+    NCSV.oversight = () => [`outlets_overseen_${st.oversight}`, [ovName, "Outlets overseen", "Target till date", "Actual till date", `${lm} sales`, "Monthly target", "Projected month-end", "MoM growth", "Till-date achievement"],
+      ov.map((x) => [x.name, x.outlets, rnd(x.target), rnd(x.actual), rnd(x.lastMonth), rnd(x.monthlyTarget), rnd(x.projected), pcsv1(x.mom), pcsv1(x.achievement)])];
+    const ovMax = Math.max(1, ...ov.map((x) => x.outlets));
+    const oversight = `<section class="panel"><div class="panel-head"><div><h2>Outlets overseen</h2><p>Outlets per ${ovName.toLowerCase()}, with projected growth against ${esc(lm)}.</p></div>
+      <div class="panel-tools">${nseg("on.oversight", [["regional", "Regional head"], ["zonal", "Zonal"]], "Oversight level")}${csvBtn("oversight")}</div></div>
+      <div class="panel-body"><div class="rank-list scroll">${ov.map((x) => `<div class="rank-row">
+        <div class="rank-name"><strong title="${esc(x.name)}">${esc(x.name)}</strong><span>${bdt(x.projected)} projected</span></div>
+        <div class="bar-track"><i class="bar-fill" style="width:${((x.outlets / ovMax) * 100).toFixed(1)}%"></i></div>
+        <div class="rank-value">${dbtn(int(x.outlets), `List ${x.name}'s outlets`, () => levelDrill(ovKey, x.name))}</div>
+        <div class="rank-value ${pn(x.mom)}" title="Month-on-month growth">${spct(x.mom)}</div></div>`).join("") || '<p class="net-empty">No outlets in view have a value for this level.</p>'}</div></div></section>`;
+
+    const shareBars = (title, sub, key, label) => {
+      const items = countBy(list, (r) => disp(r[key])), tot = items.reduce((s, x) => s + x.value, 0) || 1, max = Math.max(1, ...items.map((x) => x.value));
+      return `<section class="panel"><div class="panel-head"><div><h2>${title}</h2><p>${sub}</p></div></div><div class="panel-body"><div class="rank-list scroll">
+        ${items.map((x) => `<div class="rank-row"><div class="rank-name"><strong title="${esc(x.label)}">${esc(x.label)}</strong></div>
+          <div class="bar-track"><i class="bar-fill" style="width:${((x.value / max) * 100).toFixed(1)}%"></i></div>
+          <div class="rank-value">${dbtn(int(x.value), `List ${x.label} outlets`, () => setDrill(label, [x.label], (r) => disp(r[key])))}</div>
+          <div class="rank-value muted">${Math.round((x.value / tot) * 100)}%</div></div>`).join("") || '<p class="net-empty">No outlets in view have this field.</p>'}</div></div></section>`;
+    };
+    const COLORS = ["--series-2", "--series-1", "--series-3", "--series-4", "--idle"];
+    const donut = (title, key) => {
+      let parts = countBy(list, (r) => disp(r[key]));
+      if (parts.length > 5) { const rest = parts.slice(4); parts = parts.slice(0, 4).concat({ label: "Other", value: rest.reduce((s, x) => s + x.value, 0), values: rest.map((x) => x.label) }); }
+      const total = parts.reduce((s, x) => s + x.value, 0);
+      if (!total) return `<div class="mix"><h3>${esc(title)}</h3><p class="net-empty">No data.</p></div>`;
+      let acc = 0;
+      const stops = parts.map((x, i) => { const from = (acc / total) * 100; acc += x.value; return `var(${COLORS[i]}) ${from.toFixed(2)}% ${((acc / total) * 100).toFixed(2)}%`; }).join(", ");
+      return `<div class="mix"><h3>${esc(title)}</h3><div class="mix-body">
+        <div class="donut" role="img" aria-label="${esc(title)}: ${esc(parts.map((x) => `${x.label} ${x.value}`).join(", "))}" style="background:conic-gradient(${stops})"><div class="donut-center"><strong>${int(total)}</strong><span>outlets</span></div></div>
+        <ul class="legend">${parts.map((x, i) => `<li><i style="background:var(${COLORS[i]})"></i><span title="${esc(x.label)}">${esc(x.label)}</span>
+          ${dbtn(`${int(x.value)} · ${Math.round((x.value / total) * 100)}%`, `List ${x.label} outlets`, () => setDrill(title, x.values || [x.label], (r) => disp(r[key])))}</li>`).join("")}</ul></div></div>`;
+    };
+    const mix = `<section class="panel"><div class="panel-head"><div><h2>Portfolio mix</h2><p>Share of outlets by format, store status and PNP status.</p></div></div>
+      <div class="panel-body"><div class="mix-grid">${donut("Format", "format")}${donut("Store status", "status")}${donut("PNP status", "pnpStatus")}</div></div></section>`;
+
+    // outlet openings
+    const year = (d.month || S.netTo).slice(0, 4), byMonth = st.launch === "month";
+    const buckets = new Map();
+    list.forEach((r) => {
+      const ld = r.launchDate;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(ld || "")) return;
+      if (byMonth && ld.slice(0, 4) !== year) return;
+      const key = byMonth ? ld.slice(0, 7) : ld.slice(0, 4);
+      const x = buckets.get(key) || { key, label: byMonth ? fmonth(key) : key, outlets: 0, sft: 0, sftN: 0, lastMonth: 0, projOnBase: 0, projected: 0, actual: 0 };
+      x.outlets++;
+      if (nnum(r.sft) > 0) { x.sft += r.sft; x.sftN++; }
+      if (nnum(r.lastMonthSales) !== null) { x.lastMonth += r.lastMonthSales; x.projOnBase += nnum(r.projectedSales) || 0; }
+      x.projected += nnum(r.projectedSales) || 0; x.actual += nnum(r.salesToDate) || 0;
+      buckets.set(key, x);
+    });
+    const cohorts = [...buckets.values()].sort((x, y) => (byMonth ? x.key.localeCompare(y.key) : y.key.localeCompare(x.key)))
+      .map((x) => ({ ...x, avgSft: x.sftN ? x.sft / x.sftN : null, mom: x.lastMonth ? x.projOnBase / x.lastMonth - 1 : null, share: x.outlets / (list.length || 1) }));
+    NCSV.launch = () => [`outlet_openings_${byMonth ? year + "_by_month" : "by_year"}`, [byMonth ? "Launch month" : "Launch year", "Outlets opened", "Total SFT", "Average SFT", "Actual till date", `${lm} sales`, "Projected month-end", "MoM growth", "Share of outlets in view"],
+      cohorts.map((x) => [x.label, x.outlets, rnd(x.sft), rnd(x.avgSft), rnd(x.actual), rnd(x.lastMonth), rnd(x.projected), pcsv1(x.mom), pcsv1(x.share)])];
+    const maxShare = Math.max(0.0001, ...cohorts.map((x) => x.share));
+    const launch = `<section class="panel"><div class="panel-head"><div><h2>Outlet openings</h2><p>${byMonth ? `Openings month by month across ${year}, and how each month's cohort is trading now.` : "Cohort size, floor area and how each opening cohort is trading now."}</p></div>
+      <div class="panel-tools">${nseg("on.launch", [["year", "By launch year"], ["month", `${year} by month`]], "Opening grouping")}${csvBtn("launch")}</div></div>
+      ${cohorts.length ? `<div class="table-wrap" style="max-height:460px"><table><thead><tr><th>${byMonth ? "Launch month" : "Launch year"}</th><th class="num">Outlets</th><th>Share of outlets</th><th class="num">Total sft</th><th class="num">Average sft</th><th class="num">Actual (TD)</th><th class="num">${esc(lm)}</th><th class="num">Projected</th><th class="num">MoM growth</th></tr></thead><tbody>
+        ${cohorts.map((x) => `<tr><td class="cell-primary">${esc(x.label)}</td>
+          <td class="num">${dbtn(int(x.outlets), `List outlets opened in ${x.label}`, () => setDrill(byMonth ? "Launch month" : "Launch year", [x.key], (r) => (r.launchDate || "").slice(0, byMonth ? 7 : 4)))}</td>
+          <td style="min-width:150px"><div style="display:grid;grid-template-columns:minmax(60px,1fr) 36px;gap:8px;align-items:center"><div class="bar-track"><i class="bar-fill" style="width:${((x.share / maxShare) * 100).toFixed(1)}%"></i></div><span class="rank-value muted">${Math.round(x.share * 100)}%</span></div></td>
+          <td class="num">${x.sft ? compact(x.sft) : "—"}</td><td class="num">${x.avgSft ? int(x.avgSft) : "—"}</td><td class="num">${bdt(x.actual)}</td>
+          <td class="num">${bdt(x.lastMonth || null)}</td><td class="num"><strong>${bdt(x.projected)}</strong></td><td class="num ${pn(x.mom)}">${spct(x.mom)}</td></tr>`).join("")}
+        </tbody></table></div>` : `<p class="net-empty">${byMonth ? `No outlets opened in ${year} within the current filters.` : "No valid launch dates in the current view."}</p>`}</section>`;
+
+    // outlet register
+    const drill = st.drill, regRows = drill ? list.filter(drill.test) : list;
+    const present = d.present, rk = d.rhKey;
+    const shown = st.cols === "all" ? present : REG_KEY.map((k) => (k === "regionalHead" ? rk : k)).filter((k) => present.includes(k));
+    const register = mountTable("on-reg", {
+      title: "Outlet register", file: "outlet_register", stamp: S.netTo,
+      desc: (n) => `${int(n)} outlet${n === 1 ? "" : "s"} after filters and search. Click a row for the outlet profile. The CSV always has every column.`,
+      banner: drill ? `<div class="drill-banner">Showing <strong>${esc(drill.label)}: ${esc(drill.values.map((x) => (/^\d{4}-\d{2}$/.test(x) ? fmonth(x) : x)).join(", "))}</strong> within the sidebar filters. <button type="button" data-ndrill-clear>Show all outlets</button></div>` : "",
+      rows: regRows, key: (r) => r.code, defaultSort: "projectedSales",
+      searchText: (r) => REG_ORDER.map((k) => r[k] ?? "").join(" "),
+      tools: nseg("on.cols", [["key", "Key columns"], ["all", "All columns"]], "Columns"),
+      rowAttr: (r) => `data-noutlet="${esc(r.code)}" tabindex="0"`,
+      cols: shown.map(regCol), csvCols: present.map(regCol),
+    });
+
+    return `${sales}${glanceHtml}${league}
+      <div class="grid-h">${oversight}${shareBars("Coverage by division", "Outlet count and share of the outlets in view.", "division", "Division")}</div>
+      <div class="grid-h">${mix}${shareBars("Location type", "Where outlets trade.", "locationType", "Location type")}</div>
+      ${launch}${register}
+      <p class="muted" style="margin:0;font-size:11.5px">Outlet network data from the outlet-network Google Drive folder${driveNote() ? `, synced ${esc(driveNote())}` : ""}. ${d.source?.lastMonth?.matchedOutlets ? `${esc(lm)} baseline on ${int(d.source.lastMonth.matchedOutlets)} outlets.` : ""}</p>`;
+  }
+
+  // ---- Growth & momentum page
+  const WEEKDAYS = ["Sat", "Sun", "Mon", "Tue", "Wed", "Thu", "Fri"];
+  const SEQ = ["--seq-100", "--seq-200", "--seq-300", "--seq-400", "--seq-500", "--seq-600", "--seq-700"];
+  const QUADS = {
+    accelerating: { key: "accelerating", label: "Accelerating", glyph: "▲", color: "--good", note: "Growing and on target" },
+    holding: { key: "holding", label: "Holding", glyph: "●", color: "--info", note: "On target but slowing" },
+    catching: { key: "catching", label: "Catching up", glyph: "◆", color: "--warn", note: "Growing but short of target" },
+    atrisk: { key: "atrisk", label: "At risk", glyph: "▼", color: "--bad", note: "Declining and below target" },
+  };
+  function quadOf(g, a) {
+    g = isNum(g) ? g : 0; a = isNum(a) ? a : 0;
+    return g >= 0 && a >= 1 ? QUADS.accelerating : g < 0 && a >= 1 ? QUADS.holding : g >= 0 ? QUADS.catching : QUADS.atrisk;
+  }
+  function dailyNetwork(list) {
+    const month = S.net.month;
+    if (!/^\d{4}-\d{2}$/.test(month || "")) return [];
+    const days = monthDays(month + "-01"), through = S.netTo || "", out = [];
+    for (let dd = 1; dd <= days; dd++) { const iso = `${month}-${String(dd).padStart(2, "0")}`; out.push({ date: iso, day: dd, actual: 0, target: 0, observed: through ? iso <= through : true }); }
+    const idx = new Map(out.map((o) => [o.date, o]));
+    list.forEach((r) => {
+      Object.entries(r.dailySalesActuals || {}).forEach(([k, v]) => { const o = idx.get(k); if (o && o.observed) o.actual += nnum(v) || 0; });
+      Object.entries(r.dailySalesTargets || {}).forEach(([k, v]) => { const o = idx.get(k); if (o) o.target += nnum(v) || 0; });
+    });
+    return out;
+  }
+  function weekdayTotals(daily) {
+    const w = WEEKDAYS.map((name) => ({ name, total: 0, days: 0, avg: 0 }));
+    daily.forEach((x) => { if (!x.observed || x.actual <= 0) return; const i = (new Date(x.date + "T00:00:00Z").getUTCDay() + 1) % 7; w[i].total += x.actual; w[i].days++; });
+    w.forEach((x) => (x.avg = x.days ? x.total / x.days : 0));
+    return w;
+  }
+  const GM_LEVELS = [["regionalHead", "Regional head"], ["zonal", "Zonal"], ["outlet", "Outlet"]];
+  function pageGM() {
+    const g = netGuard(); if (g) return g;
+    NDRILL.clear();
+    const st = S.gm, lm = netLM(), list = inView();
+
+    // hero
+    const b = baseTotals(list);
+    const projTotal = nsum(list, "projectedSales"), monthlyTarget = nsum(list, "monthlyTarget"), targetToDate = nsum(list, "targetToDate"), actualToDate = nsum(list, "salesToDate");
+    const ach = monthlyTarget ? projTotal / monthlyTarget : null, achToDate = targetToDate ? actualToDate / targetToDate : null;
+    const growing = b.withBase.filter((r) => nnum(r.momGrowth) > 0.02).length, declining = b.withBase.filter((r) => nnum(r.momGrowth) !== null && r.momGrowth < -0.02).length;
+    const flat = b.withBase.length - growing - declining;
+    const daily = dailyNetwork(list), observed = daily.filter((x) => x.observed && x.actual > 0);
+    const runRate = observed.length ? observed.reduce((s, x) => s + x.actual, 0) / observed.length : null;
+    const remaining = daily.filter((x) => !x.observed).length;
+    const neededRate = remaining && monthlyTarget ? Math.max(0, monthlyTarget - actualToDate) / remaining : null;
+    const pjTone = perfTone(ach), tdTone = perfTone(achToDate);
+    const shareOf = (n) => (b.withBase.length ? pct0(n / b.withBase.length) + " of outlets with a baseline" : "No baseline");
+    const heroHtml = `<section class="panel"><div class="panel-head"><div><h2>Where the network is heading</h2><p>Month-end projection for ${int(list.length)} outlets, measured against ${esc(lm)} actual and the monthly target.</p></div>
+      <div class="panel-tools">${dateControls(false)}<button class="btn" data-nreport>Regional head report</button></div></div>
+      <div class="panel-body"><div class="kpis net-kpis">
+      ${netHero({ label: "Projected this month", value: bdt(projTotal || null), title: exact(projTotal), sub: `${tchip(pjTone)} ${pct0(ach)} of monthly target`, ratio: ach, tone: pjTone, aria: `Projected ${pct0(ach)} of monthly target`, scale: "Monthly target",
+        rows: [["Month on month", spct(b.growth), pn(b.growth)], [`Change vs ${lm}`, b.growth === null ? "—" : signed(b.change)], ["Gap to target", monthlyTarget ? signed(projTotal - monthlyTarget) : "—", projTotal - monthlyTarget >= 0 ? "pos" : "neg"]],
+        foot: `<span>Growth measured on the ${int(b.withBase.length)} outlets with a ${esc(lm)} baseline</span>` })}
+      ${kpi({ label: "Total target", value: bdt(monthlyTarget || null), sub: `${bdt(targetToDate || null)} due till date`, foot: "<span>Full-month target</span>", accent: "var(--line)" })}
+      ${kpi({ label: "Actual till date", value: bdt(actualToDate || null), sub: tchip(tdTone, pct0(achToDate) + " · " + tdTone.label), foot: `<span>Gap ${targetToDate ? signed(actualToDate - targetToDate) : "—"}</span>`, accent: "var(--series-2)" })}
+      ${kpi({ label: `${esc(lm)} sales`, value: bdt(b.lastTotal || null), sub: `${int(b.withBase.length)} of ${int(list.length)} outlets have a baseline`, foot: "<span>Full-month actual</span>", accent: "var(--series-3)" })}
+      ${kpi({ label: "Daily run rate", value: bdt(runRate), sub: neededRate === null ? "Month complete" : `${bdt(neededRate)} a day needed to hit target`, foot: `<span>${int(observed.length)} trading days observed · ${int(remaining)} left</span>`, accent: "var(--series-4)" })}
+      </div></div>
+      <div class="stat-strip" style="border-top:1px solid var(--line-soft)">${[["Growing", growing, "good", "MoM above +2%", shareOf(growing)], ["Flat", flat, "warn", "MoM within ±2%", shareOf(flat)],
+        ["Declining", declining, "bad", "MoM below −2%", shareOf(declining)], ["No baseline", list.length - b.withBase.length, "idle", `Not in ${lm} file`, "Left out of growth"]]
+        .map(([l, n, k, rule, note]) => `<div><span><span class="chip ${k}">${esc(l)}</span> <span class="muted" style="font-weight:500">${esc(rule)}</span></span><strong>${int(n)}</strong><small>${esc(note)}</small></div>`).join("")}</div></section>`;
+
+    // callouts
+    const cards = [];
+    const rho = netGroup(list, "regionalHead").filter((x) => x.lastMonth > 0).sort((x, y) => (y.delta || 0) - (x.delta || 0));
+    const netGain = b.projOnBase - b.lastTotal;
+    if (rho.length && (rho[0].delta || 0) > 0) {
+      const top = rho[0];
+      cards.push({ tone: "good", tag: "Leading", title: `${top.name} is adding the most`, body: `${bdt(top.delta)} more than ${lm} across ${int(top.outlets)} outlets, ${spct(top.mom)} growth.` + (netGain > 0 ? ` That is ${pct0(Math.min(1, top.delta / netGain))} of the network's net gain.` : "") });
+    }
+    if (rho.length > 1 && (rho[rho.length - 1].delta || 0) < 0) {
+      const w = rho[rho.length - 1];
+      cards.push({ tone: "bad", tag: "Drag", title: `${w.name} is the biggest drag`, body: `${bdt(w.delta)} against ${lm} (${spct(w.mom)}) across ${int(w.outlets)} outlets. Projected achievement is ${pct0(w.projectedAchievement)}.` });
+    }
+    const risk = list.filter((r) => nnum(r.momGrowth) !== null && r.momGrowth < -0.02 && nnum(r.projectedAchievement) !== null && r.projectedAchievement < 1);
+    if (risk.length) cards.push({ tone: "bad", tag: "At risk", title: `${int(risk.length)} outlets are declining and behind target`, body: `Together they are ${bdt(risk.reduce((s, r) => s + Math.abs(nnum(r.projectedGap) || 0), 0))} short of their monthly target, the quickest place to recover the gap. Switch the quadrant to Outlet to find them.` });
+    const ranked = list.slice().sort((x, y) => (nnum(y.projectedSales) || 0) - (nnum(x.projectedSales) || 0));
+    if (ranked.length > 10 && projTotal) {
+      const n = Math.max(1, Math.round(ranked.length * 0.1)), sh = ranked.slice(0, n).reduce((s, r) => s + (nnum(r.projectedSales) || 0), 0) / projTotal;
+      cards.push({ tone: "info", tag: "Concentration", title: `The top 10% of outlets carry ${pct0(sh)} of projected sales`, body: `${int(n)} of ${int(ranked.length)} outlets. ${sh > 0.35 ? "Revenue is concentrated, so protect these first." : "Revenue is well spread across the estate."}` });
+    }
+    const wk = weekdayTotals(daily).filter((w) => w.days > 0);
+    if (wk.length > 1) {
+      const best = wk.slice().sort((x, y) => y.avg - x.avg)[0], avgAll = wk.reduce((s, w) => s + w.avg, 0) / wk.length;
+      cards.push({ tone: "info", tag: "Rhythm", title: `${best.name} is the strongest trading day`, body: `${bdt(best.avg)} on an average ${best.name}, ${spct(best.avg / avgAll - 1)} against the average weekday. ${int(best.days)} such day${best.days === 1 ? "" : "s"} observed this month.` });
+    }
+    const thisYear = (S.net.month || "").slice(0, 4), cohort = list.filter((r) => (r.launchDate || "").slice(0, 4) === thisYear);
+    if (cohort.length && projTotal) {
+      const cp = cohort.reduce((s, r) => s + (nnum(r.projectedSales) || 0), 0);
+      cards.push({ tone: "warn", tag: "New outlets", title: `${int(cohort.length)} outlets opened in ${thisYear} bring ${pct0(cp / projTotal)} of sales`, body: `${bdt(cp)} projected from the newest cohort: ${pct0(cohort.length / list.length)} of outlets.` });
+    }
+    if (monthlyTarget) {
+      const gap = monthlyTarget - projTotal;
+      cards.push({ tone: gap > 0 ? "warn" : "good", tag: "Target", title: gap > 0 ? `${bdt(gap)} short of the monthly target` : `Tracking ${bdt(-gap)} ahead of target`,
+        body: remaining > 0 ? `${int(remaining)} days left. ${gap > 0 ? `Closing it needs an extra ${bdt(gap / remaining)} a day on top of the projection.` : "The current run rate is enough to finish ahead."}` : "The month is complete on the selected date." });
+    }
+    const callouts = `<section class="panel"><div class="panel-head"><div><h2>What the numbers are saying</h2><p>Written from the outlets in view; it changes as you filter.</p></div></div>
+      <div class="panel-body"><div class="findings">${cards.map((c) => `<div class="finding" style="--sev:var(--${c.tone})"><div class="finding-bar"></div><div><h3><span class="chip ${c.tone}">${esc(c.tag)}</span> <span>${esc(c.title)}</span></h3><p>${esc(c.body)}</p></div></div>`).join("") || '<p class="net-empty">Not enough data in the current selection to write a read-out.</p>'}</div></div></section>`;
+
+    // quadrant (drawn after the page is in the DOM, at its measured width)
+    const quadGroups = netGroup(list, st.quad).filter((x) => x.lastMonth > 0 && x.monthlyTarget > 0).map((x) => ({ ...x, quad: quadOf(x.mom, x.projectedAchievement) }));
+    NCSV.quad = () => [`momentum_quadrant_${st.quad}`, [NET_LEVELS[st.quad], "Quadrant", "Outlets", `${lm} sales`, "Projected month-end", "MoM change", "MoM growth", "Monthly target", "Projected achievement"],
+      quadGroups.map((x) => [x.name, x.quad.label, x.outlets, rnd(x.lastMonth), rnd(x.projected), rnd(x.delta || 0), pcsv1(x.mom), rnd(x.monthlyTarget), pcsv1(x.projectedAchievement)])];
+    const quad = `<section class="panel"><div class="panel-head"><div><h2>Momentum quadrant</h2><p>Month-on-month growth against projected target achievement. Marker shape names the quadrant; size is projected sales.</p></div>
+      <div class="panel-tools">${nseg("gm.quad", GM_LEVELS, "Quadrant level")}${csvBtn("quad")}</div></div>
+      <div class="panel-body"><div class="chart"><svg id="quadrantChart" role="img" aria-label="Momentum quadrant scatter plot"></svg></div><div class="quad-legend" id="quadrantLegend"></div><p class="chart-note" id="quadrantNote"></p></div></section>`;
+
+    // movers
+    const movers = netGroup(list, st.mover).filter((x) => x.lastMonth > 0 && x.delta !== null).sort((x, y) => (st.dir === "gain" ? y.delta - x.delta : x.delta - y.delta));
+    const mShown = movers.slice(0, st.mover === "outlet" ? 40 : 30);
+    NCSV.movers = () => [`top_movers_${st.mover}_${st.dir}`, [NET_LEVELS[st.mover], "Detail", "Outlets", `${lm} sales`, "Projected month-end", "MoM change", "MoM growth", "Projected achievement"],
+      movers.map((x) => [x.name, x.sub, x.outlets, rnd(x.lastMonth), rnd(x.projected), rnd(x.delta || 0), pcsv1(x.mom), pcsv1(x.projectedAchievement)])];
+    let moverBody = '<p class="net-empty">No group in view has a last-month baseline.</p>';
+    if (mShown.length) {
+      const maxAbs = Math.max(...mShown.map((x) => Math.abs(x.delta)), 1), mixed = mShown.some((x) => x.delta >= 0) && mShown.some((x) => x.delta < 0);
+      const origin = mixed ? 50 : mShown[0].delta >= 0 ? 0 : 100, scale = mixed ? 50 : 100;
+      moverBody = `<div class="rank-list scroll">${mShown.map((x) => {
+        const w = Math.max(0.8, (Math.abs(x.delta) / maxAbs) * scale), left = x.delta >= 0 ? origin : origin - w;
+        return `<div class="rank-row"${st.mover === "outlet" && x.code ? ` role="button" tabindex="0" data-noutlet="${esc(x.code)}"` : ""}>
+          <div class="rank-name"><strong title="${esc(x.name)}">${esc(x.name)}</strong><span>${esc(x.sub)}</span></div>
+          <div class="bar-track"><i class="bar-fill" style="left:${left.toFixed(1)}%;width:${w.toFixed(1)}%;background:var(${x.delta >= 0 ? "--good" : "--bad"})"></i>${mixed ? `<span class="bar-axis" style="left:${origin}%"></span>` : ""}</div>
+          <div class="rank-value" title="${esc(exact(x.delta))}">${x.delta >= 0 ? "+" : "−"}${compact(Math.abs(x.delta))}</div>
+          <div class="rank-value ${pn(x.delta)}">${spct(x.mom)}</div></div>`;
+      }).join("")}</div>
+      <p class="chart-note">Bar length is the taka change; the percentage is growth on the same group's last-month base.${st.mover === "outlet" ? " Click an outlet for its profile." : ""}${movers.length > mShown.length ? ` Showing the top ${int(mShown.length)} of ${int(movers.length)}; the CSV has all of them.` : ""}</p>`;
+    }
+    const moversHtml = `<section class="panel"><div class="panel-head"><div><h2>Top movers</h2><p>${st.dir === "gain" ? "Largest gains" : "Largest declines"} in projected monthly sales against ${esc(lm)}.</p></div>
+      <div class="panel-tools">${nseg("gm.mover", GM_LEVELS, "Mover level")}${nseg("gm.dir", [["gain", "Gainers"], ["loss", "Decliners"]], "Direction")}${csvBtn("movers")}</div></div>
+      <div class="panel-body">${moverBody}</div></section>`;
+
+    // heatmap
+    const P = palette(), seen = daily.filter((x) => x.observed && x.actual > 0), heatRows = [];
+    let heatBody = '<p class="net-empty">No trading days observed in the current selection.</p>';
+    if (seen.length) {
+      const first = (new Date(daily[0].date + "T00:00:00Z").getUTCDay() + 1) % 7, weeks = [];
+      daily.forEach((x) => { const wd = (new Date(x.date + "T00:00:00Z").getUTCDay() + 1) % 7, wi = Math.floor((first + x.day - 1) / 7); (weeks[wi] = weeks[wi] || Array(7).fill(null))[wd] = x; });
+      const vals = seen.map((x) => x.actual), min = Math.min(...vals), max = Math.max(...vals);
+      const step = (v) => (max === min ? 3 : Math.min(6, Math.max(0, Math.round(((v - min) / (max - min)) * 6))));
+      const body = weeks.filter(Boolean).map((week) => {
+        const ds = week.filter(Boolean), label = `${ds[0].day}–${ds[ds.length - 1].day}`;
+        return `<div class="heat-row"><div class="heat-label">${label}</div>${week.map((x, wd) => {
+          if (!x) return '<div class="heat-cell outside" aria-hidden="true"></div>';
+          heatRows.push([x.date, WEEKDAYS[wd], label, rnd(x.actual), rnd(x.target), x.target ? pcsv1(x.actual / x.target) : "", x.observed ? "yes" : "no"]);
+          if (!x.observed || x.actual <= 0) return `<div class="heat-cell pending" title="${esc(fdate(x.date))}: not traded yet · target ${esc(bdt(x.target || null))}"></div>`;
+          const hex = P(SEQ[step(x.actual)]), vs = x.target ? x.actual / x.target : null;
+          return `<div class="heat-cell" style="background:${hex};color:${readableInk(hex)}" title="${esc(fdate(x.date))} · ${esc(bdt(x.actual))} · ${vs === null ? "no target" : pct0(vs) + " of target"}">${esc(compact(x.actual))}</div>`;
+        }).join("")}</div>`;
+      }).join("");
+      const wks = weekdayTotals(daily).filter((w) => w.days), best = wks.slice().sort((x, y) => y.avg - x.avg)[0], worst = wks.slice().sort((x, y) => x.avg - y.avg)[0];
+      heatBody = `<div class="heatmap"><div class="heat-row"><div class="heat-head">Days</div>${WEEKDAYS.map((w) => `<div class="heat-head">${w}</div>`).join("")}</div>${body}
+        <div class="heat-scale"><span>${esc(bdt(min))}</span><i>${SEQ.map((s) => `<b style="background:var(${s})"></b>`).join("")}</i><span>${esc(bdt(max))}</span><span style="margin-left:auto;display:inline-flex;align-items:center;gap:6px"><span class="heat-cell pending" style="width:18px;height:12px;display:inline-block"></span>Not traded yet</span></div></div>
+        ${best && worst && best !== worst ? `<p class="chart-note">Best average day ${best.name} (${esc(bdt(best.avg))}), weakest ${worst.name} (${esc(bdt(worst.avg))}).</p>` : ""}`;
+    }
+    NCSV.heat = () => ["trading_day_heatmap", ["Date", "Weekday", "Week", "Sales", "Target", "Achievement", "Observed"], heatRows];
+    const heat = `<section class="panel"><div class="panel-head"><div><h2>Trading-day heatmap</h2><p>Network sales by week and weekday · ${esc(fmonth(S.net.month))}</p></div><div class="panel-tools">${csvBtn("heat")}</div></div>
+      <div class="panel-body">${heatBody}</div></section>`;
+
+    const traj = `<section class="panel"><div class="panel-head"><div><h2>Month trajectory</h2><p>Cumulative sales against cumulative target · ${esc(fmonth(S.net.month))}</p></div><div class="panel-tools">${csvBtn("traj")}</div></div>
+      <div class="panel-body"><div class="chart-legend"><span><i class="swatch" style="background:var(--series-2)"></i>Actual to date</span><span><i class="swatch dash-1"></i>Projected finish</span><span><i class="swatch dash"></i>Cumulative target</span></div>
+      <div class="chart"><svg id="trajectoryChart" role="img" aria-label="Cumulative sales against target across the month"></svg></div><p class="chart-note" id="trajectoryNote"></p></div></section>`;
+
+    // league table
+    const lg = st.league, lgName = NET_LEVELS[lg];
+    const league = mountTable("gm-league", {
+      title: `${lgName} league table`, file: `${lg}_league_table`, stamp: S.netTo,
+      desc: (n) => `${int(n)} ${lgName.toLowerCase()} groups. Click a heading to sort; sorted by projected month-end sales until you pick a column. The CSV has every column.`,
+      rows: netGroup(list, lg), key: (x) => x.name, searchText: (x) => x.name, defaultSort: "projected", pageSize: 50,
+      tools: nseg("gm.league", [["regionalHead", "Regional head"], ["zonal", "Zonal"], ["division", "Division"], ["format", "Format"]], "League level"),
+      cols: [
+        { k: "name", label: lgName, fmt: (x) => `<span class="cell-primary" title="${esc(x.sub)}">${esc(x.name)}</span>`, csv: (x) => x.name },
+        { k: "outlets", label: "Outlets", num: 1, fmt: (x) => int(x.outlets) },
+        { k: "lastMonth", label: lm, num: 1, fmt: (x) => bdt(x.lastMonth || null), csv: (x) => rnd(x.lastMonth) },
+        { k: "actual", label: "Actual (TD)", num: 1, fmt: (x) => bdt(x.actual), csv: (x) => rnd(x.actual) },
+        { k: "target", label: "Target (TD)", num: 1, fmt: (x) => bdt(x.target), csv: (x) => rnd(x.target) },
+        { k: "achievement", label: "Ach. (TD)", num: 1, fmt: (x) => ratePair(x.achievement), csv: (x) => pcsv1(x.achievement) },
+        { k: "monthlyTarget", label: "Monthly target", num: 1, fmt: (x) => bdt(x.monthlyTarget), csv: (x) => rnd(x.monthlyTarget) },
+        { k: "projected", label: "Projected", num: 1, fmt: (x) => bdt(x.projected), csv: (x) => rnd(x.projected) },
+        { k: "projectedAchievement", label: "Projected ach.", num: 1, fmt: (x) => ratePair(x.projectedAchievement), csv: (x) => pcsv1(x.projectedAchievement) },
+        { k: "delta", label: "MoM change", num: 1, fmt: (x) => `<span class="${pn(x.delta)}" title="${esc(exact(x.delta))}">${signed(x.delta)}</span>`, csv: (x) => rnd(x.delta) },
+        { k: "mom", label: "MoM growth", num: 1, fmt: (x) => `<span class="${pn(x.mom)}">${spct(x.mom)}</span>`, csv: (x) => pcsv1(x.mom) },
+      ],
+    });
+
+    AFTER.push(() => drawGmCharts(list, quadGroups, daily));
+    return `${heroHtml}${callouts}${quad}<div class="grid-h">${moversHtml}${heat}</div>${traj}${league}`;
+  }
+
+  let gmChartWidth = 0;
+  function drawGmCharts(list, quadGroups, daily) {
+    const svg = $("#quadrantChart");
+    if (!svg) return;
+    gmChartWidth = svg.parentElement.clientWidth;
+    drawQuadrant(svg, quadGroups);
+    drawTrajectory($("#trajectoryChart"), list, daily);
+  }
+  function drawQuadrant(svg, groups) {
+    const P = palette(), lm = netLM(), isOutlet = S.gm.quad === "outlet";
+    svg.replaceChildren();
+    const W = Math.max(280, Math.round(svg.parentElement.clientWidth)), H = W < 520 ? 340 : 420, pad = { t: 24, r: 22, b: 48, l: 60 };
+    svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.setAttribute("height", H); svg.style.height = H + "px";
+    const plotW = W - pad.l - pad.r, plotH = H - pad.t - pad.b;
+    const legend = $("#quadrantLegend"), note = $("#quadrantNote");
+    if (!groups.length) {
+      const t = svgEl("text", { x: W / 2, y: H / 2, "text-anchor": "middle", fill: P("--viz-muted"), "font-size": 14 });
+      t.textContent = "No group in the current selection has both a last-month baseline and a monthly target.";
+      svg.append(t); legend.replaceChildren(); note.textContent = "";
+      return;
+    }
+    // Robust domain: the span is the 90th percentile of |value|, so one runaway outlier can't squash
+    // everyone into the centre. Outliers clamp to the edge.
+    const span = (vals, floor) => {
+      const abs = vals.map(Math.abs).filter(isFinite).sort((x, y) => x - y);
+      return abs.length ? Math.max(floor, Math.ceil(abs[Math.min(abs.length - 1, Math.floor(abs.length * 0.9))] * 1.15 * 100) / 100) : floor;
+    };
+    const gS = span(groups.map((x) => x.mom), 0.1), aS = span(groups.map((x) => x.projectedAchievement - 1), 0.08);
+    const clamped = groups.filter((x) => Math.abs(x.mom) > gS || Math.abs(x.projectedAchievement - 1) > aS).length;
+    const X = (v) => pad.l + ((Math.max(-gS, Math.min(gS, v)) + gS) / (2 * gS)) * plotW;
+    const Y = (v) => pad.t + plotH - ((Math.max(-aS, Math.min(aS, v - 1)) + aS) / (2 * aS)) * plotH;
+    const cx = X(0), cy = Y(1);
+    [{ q: QUADS.holding, x: pad.l, y: pad.t, w: cx - pad.l, h: cy - pad.t }, { q: QUADS.accelerating, x: cx, y: pad.t, w: pad.l + plotW - cx, h: cy - pad.t },
+      { q: QUADS.atrisk, x: pad.l, y: cy, w: cx - pad.l, h: pad.t + plotH - cy }, { q: QUADS.catching, x: cx, y: cy, w: pad.l + plotW - cx, h: pad.t + plotH - cy }].forEach((w) => {
+      if (w.w <= 0 || w.h <= 0) return;
+      svg.append(svgEl("rect", { x: w.x, y: w.y, width: w.w, height: w.h, fill: P(w.q.color), opacity: 0.06 }));
+      const l = svgEl("text", { x: w.x + w.w / 2, y: w.y + w.h / 2, "text-anchor": "middle", "dominant-baseline": "middle", fill: P("--viz-muted"), "font-size": W < 520 ? 12 : 16, "font-weight": 620, opacity: 0.55, "pointer-events": "none" });
+      l.textContent = `${w.q.glyph} ${w.q.label}`;
+      svg.append(l);
+    });
+    svg.append(svgEl("rect", { x: pad.l, y: pad.t, width: plotW, height: plotH, fill: "none", stroke: P("--viz-grid") }));
+    svg.append(svgEl("line", { x1: cx, y1: pad.t, x2: cx, y2: pad.t + plotH, stroke: P("--viz-axis"), "stroke-width": 1.5, "stroke-dasharray": "5 4" }));
+    svg.append(svgEl("line", { x1: pad.l, y1: cy, x2: pad.l + plotW, y2: cy, stroke: P("--viz-axis"), "stroke-width": 1.5, "stroke-dasharray": "5 4" }));
+    const tick = (tx, ty, label, anchor) => { const t = svgEl("text", { x: tx, y: ty, "text-anchor": anchor, fill: P("--viz-muted"), "font-size": 11 }); t.textContent = label; svg.append(t); };
+    [-gS, -gS / 2, 0, gS / 2, gS].forEach((v) => tick(X(v), pad.t + plotH + 18, spct(v, 0), "middle"));
+    [1 - aS, 1 - aS / 2, 1, 1 + aS / 2, 1 + aS].forEach((v) => tick(pad.l - 10, Y(v) + 4, npct(v), "end"));
+    const xt = svgEl("text", { x: pad.l + plotW / 2, y: H - 8, "text-anchor": "middle", fill: P("--viz-muted"), "font-size": 11.5, "font-weight": 600 });
+    xt.textContent = `Month-on-month growth vs ${lm} →`; svg.append(xt);
+    const yt = svgEl("text", { x: 16, y: pad.t + plotH / 2, "text-anchor": "middle", fill: P("--viz-muted"), "font-size": 11.5, "font-weight": 600, transform: `rotate(-90 16 ${pad.t + plotH / 2})` });
+    yt.textContent = "Projected target achievement →"; svg.append(yt);
+    // shape carries the quadrant, colour is the second cue
+    const maxProj = Math.max(...groups.map((x) => x.projected), 1);
+    const shape = (q, px, py, r) => {
+      if (q.key === "holding") return svgEl("circle", { cx: px, cy: py, r });
+      if (q.key === "catching") return svgEl("polygon", { points: `${px},${py - r} ${px + r},${py} ${px},${py + r} ${px - r},${py}` });
+      const dir = q.key === "accelerating" ? -1 : 1;
+      return svgEl("polygon", { points: `${px},${py + dir * r} ${px + r},${py - dir * r * 0.8} ${px - r},${py - dir * r * 0.8}` });
+    };
+    const sorted = groups.slice().sort((x, y) => y.projected - x.projected);
+    const labelled = new Set(sorted.slice(0, isOutlet ? 0 : W < 520 ? 3 : 8).map((x) => x.name)), placed = [];
+    sorted.forEach((gr) => {
+      const r = isOutlet ? 3 + Math.sqrt(gr.projected / maxProj) * 6 : 7 + Math.sqrt(gr.projected / maxProj) * 15, px = X(gr.mom), py = Y(gr.projectedAchievement);
+      const node = shape(gr.quad, px, py, r);
+      node.setAttribute("fill", P(gr.quad.color)); node.setAttribute("fill-opacity", isOutlet ? 0.62 : 0.85);
+      node.setAttribute("stroke", P("--viz-surface")); node.setAttribute("stroke-width", 2);
+      if (isOutlet && gr.code) { node.style.cursor = "pointer"; node.addEventListener("click", () => { hideTip(); openNetOutlet(gr.code); }); }
+      attachTip(node, () => `<strong>${esc(gr.name)}</strong><dl><dt>${esc(gr.quad.glyph + " " + gr.quad.label)}</dt><dd>${esc(gr.sub || "")}</dd>
+        <dt>${esc(lm)}</dt><dd>${bdt(gr.lastMonth)}</dd><dt>Projected</dt><dd>${bdt(gr.projected)}</dd><dt>MoM growth</dt><dd>${spct(gr.mom)}</dd>
+        <dt>Monthly target</dt><dd>${bdt(gr.monthlyTarget)}</dd><dt>Projected ach.</dt><dd>${npct(gr.projectedAchievement)}</dd></dl>`);
+      svg.append(node);
+      // Direct-label the biggest groups, skipping any label that would collide with one already placed.
+      if (labelled.has(gr.name)) {
+        const short = gr.name.replace(/\(.*?\)/g, "").trim().split(/\s+/).filter((w) => !/^(mr|md|mrs|ms)\.?$/i.test(w)).slice(0, 2).join(" ");
+        const ly = py - r - 6;
+        if (!placed.some((p) => Math.abs(p.x - px) < 78 && Math.abs(p.y - ly) < 15)) {
+          const at = { x: px, y: ly, "text-anchor": "middle", "font-size": 11, "font-weight": 650, "pointer-events": "none" };
+          const halo = svgEl("text", { ...at, fill: P("--viz-surface"), stroke: P("--viz-surface"), "stroke-width": 4, "stroke-linejoin": "round" }), lab = svgEl("text", { ...at, fill: P("--viz-ink") });
+          halo.textContent = short; lab.textContent = short;
+          svg.append(halo, lab); placed.push({ x: px, y: ly });
+        }
+      }
+    });
+    legend.innerHTML = Object.values(QUADS).map((q) => {
+      const m = groups.filter((x) => x.quad.key === q.key);
+      return `<div class="quad-item"><span class="glyph" style="color:${P(q.color)}" aria-hidden="true">${q.glyph}</span><div><strong>${q.label} · ${int(m.length)}</strong><small>${q.note} · ${bdt(m.reduce((s, x) => s + x.projected, 0))} projected</small></div></div>`;
+    }).join("");
+    note.textContent = `${int(groups.length)} ${NET_LEVELS[S.gm.quad].toLowerCase()} group${groups.length === 1 ? "" : "s"} plotted; marker area is projected month-end sales. `
+      + `Axes are scaled to the bulk of the data (±${spct(gS, 0).replace("+", "")} growth, ${npct(1 - aS)}–${npct(1 + aS)} achievement)`
+      + (clamped ? `; ${int(clamped)} beyond that sit pinned on the edge. Hover for the true value.` : ".");
+  }
+  function drawTrajectory(svg, list, daily) {
+    if (!svg) return;
+    const P = palette();
+    svg.replaceChildren();
+    NCSV.traj = () => ["month_trajectory", ["Date", "Day", "Daily sales", "Daily target", "Cumulative sales", "Cumulative projected", "Cumulative target"], []];
+    if (!daily.length) return;
+    const W = Math.max(280, Math.round(svg.parentElement.clientWidth)), H = Math.max(240, Math.min(340, W * (W < 520 ? 0.75 : 0.34))), pad = { t: 18, r: W < 520 ? 68 : 96, b: 40, l: 54 };
+    svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.setAttribute("height", H); svg.style.height = H + "px";
+    const plotW = W - pad.l - pad.r, plotH = H - pad.t - pad.b;
+    let ca = 0, ct = 0;
+    const series = daily.map((x) => { if (x.observed) ca += x.actual; ct += x.target; return { ...x, cumActual: x.observed && x.actual > 0 ? ca : null, cumTarget: ct }; });
+    const obs = series.filter((s) => s.cumActual !== null), last = obs[obs.length - 1];
+    const projectedTotal = nsum(list, "projectedSales"), observedTotal = last ? last.cumActual : 0;
+    const rest = series.filter((s) => last && s.day > last.day), restTarget = rest.reduce((s, x) => s + x.target, 0);
+    let accum = observedTotal;
+    // Spread the projected remainder across the remaining days in proportion to their target weight.
+    const proj = rest.map((x) => { accum += (projectedTotal - observedTotal) * (restTarget ? x.target / restTarget : 1 / rest.length); return { day: x.day, value: accum }; });
+    const rawMax = Math.max(ct, projectedTotal, observedTotal, 1) * 1.04, mag = Math.pow(10, Math.floor(Math.log10(rawMax / 4))), step = Math.ceil(rawMax / 4 / mag) * mag, maxY = step * 4;
+    const X = (day) => pad.l + ((day - 1) / Math.max(1, daily.length - 1)) * plotW, Y = (v) => pad.t + plotH - (v / maxY) * plotH;
+    for (let i = 0; i <= 4; i++) {
+      const gy = Y(step * i);
+      svg.append(svgEl("line", { x1: pad.l, y1: gy, x2: pad.l + plotW, y2: gy, stroke: P("--viz-grid") }));
+      const t = svgEl("text", { x: pad.l - 10, y: gy + 4, "text-anchor": "end", fill: P("--viz-muted"), "font-size": 10.5 }); t.textContent = compact(step * i); svg.append(t);
+    }
+    daily.forEach((x) => {
+      if (x.day !== 1 && x.day !== daily.length && x.day % (W < 520 ? 10 : 5) !== 0) return;
+      const t = svgEl("text", { x: X(x.day), y: pad.t + plotH + 18, "text-anchor": "middle", fill: P("--viz-muted"), "font-size": 10.5 }); t.textContent = String(x.day); svg.append(t);
+    });
+    svg.append(svgEl("line", { x1: pad.l, y1: pad.t + plotH, x2: pad.l + plotW, y2: pad.t + plotH, stroke: P("--viz-axis") }));
+    const path = (pts) => pts.map((p, i) => `${i ? "L" : "M"}${X(p.day).toFixed(1)},${Y(p.value).toFixed(1)}`).join(" ");
+    svg.append(svgEl("path", { d: path(series.map((s) => ({ day: s.day, value: s.cumTarget }))), fill: "none", stroke: P("--viz-axis"), "stroke-width": 2, "stroke-dasharray": "6 5", "stroke-linecap": "round" }));
+    if (obs.length) svg.append(svgEl("path", { d: path(obs.map((s) => ({ day: s.day, value: s.cumActual }))), fill: "none", stroke: P("--series-2"), "stroke-width": 2.5, "stroke-linecap": "round", "stroke-linejoin": "round" }));
+    if (proj.length && last) svg.append(svgEl("path", { d: path([{ day: last.day, value: observedTotal }].concat(proj)), fill: "none", stroke: P("--series-2"), "stroke-width": 2.5, "stroke-dasharray": "7 6", "stroke-linecap": "round", opacity: 0.75 }));
+    const endLabel = (value, text, color, dy) => {
+      const ly = Math.max(pad.t + 10, Math.min(pad.t + plotH, Y(value) + dy));
+      const t1 = svgEl("text", { x: pad.l + plotW + 8, y: ly - 4, fill: color, "font-size": 10.5, "font-weight": 800 }), t2 = svgEl("text", { x: pad.l + plotW + 8, y: ly + 9, fill: P("--viz-muted"), "font-size": 10.5 });
+      t1.textContent = text; t2.textContent = compact(value); svg.append(t1, t2);
+    };
+    endLabel(ct, "Target", P("--viz-muted"), ct >= projectedTotal ? -8 : 12);
+    endLabel(projectedTotal, "Projected", P("--series-2"), ct >= projectedTotal ? 14 : -6);
+    if (last) {
+      svg.append(svgEl("line", { x1: X(last.day), y1: pad.t, x2: X(last.day), y2: pad.t + plotH, stroke: P("--viz-axis"), "stroke-dasharray": "3 4" }));
+      svg.append(svgEl("circle", { cx: X(last.day), cy: Y(observedTotal), r: 4.5, fill: P("--series-2"), stroke: P("--viz-surface"), "stroke-width": 2 }));
+    }
+    const hover = svgEl("line", { y1: pad.t, y2: pad.t + plotH, stroke: P("--accent"), opacity: 0 }), cap = svgEl("rect", { x: pad.l, y: pad.t, width: plotW, height: plotH, fill: "transparent" });
+    svg.append(hover, cap);
+    const projByDay = new Map(proj.map((p) => [p.day, p.value]));
+    cap.addEventListener("pointermove", (e) => {
+      const box = svg.getBoundingClientRect(), px = ((e.clientX - box.left) / box.width) * W, day = Math.round(((px - pad.l) / plotW) * (daily.length - 1)) + 1, s = series.find((v) => v.day === day);
+      if (!s) return;
+      hover.setAttribute("x1", X(day)); hover.setAttribute("x2", X(day)); hover.setAttribute("opacity", 1);
+      const cum = s.cumActual !== null ? s.cumActual : projByDay.get(day);
+      showTip(e, `<strong>${fdate(s.date)} · day ${day}</strong><dl><dt>${s.cumActual === null ? "Projected cumulative" : "Cumulative sales"}</dt><dd>${bdt(cum)}</dd>
+        <dt>Cumulative target</dt><dd>${bdt(s.cumTarget)}</dd><dt>Variance</dt><dd>${cum == null ? "—" : bdt(cum - s.cumTarget)}</dd><dt>Day sales</dt><dd>${s.observed && s.actual ? bdt(s.actual) : "—"}</dd></dl>`);
+    });
+    cap.addEventListener("pointerleave", () => { hover.setAttribute("opacity", 0); hideTip(); });
+    NCSV.traj = () => ["month_trajectory", ["Date", "Day", "Daily sales", "Daily target", "Cumulative sales", "Cumulative projected", "Cumulative target"],
+      series.map((s) => [s.date, s.day, s.observed ? rnd(s.actual) : "", rnd(s.target), rnd(s.cumActual), rnd(s.cumActual !== null ? s.cumActual : projByDay.get(s.day)), rnd(s.cumTarget)])];
+    const variance = observedTotal - (last ? last.cumTarget : 0);
+    $("#trajectoryNote").textContent = last ? `Through ${fdate(last.date)} the network is ${bdt(Math.abs(variance))} ${variance >= 0 ? "ahead of" : "behind"} the cumulative target. The dashed tail spreads the remaining projection across the ${int(proj.length)} unfinished days in proportion to their daily target.` : "";
+  }
+
+  // ---- outlet profile drawer (both network pages)
+  function openNetOutlet(code) {
+    const pool = inView(), row = pool.find((r) => r.code === code) || baseList().find((r) => r.code === code);
+    if (!row) return;
+    const lm = netLM(), tdT = perfTone(row.salesAchievement), pjT = perfTone(row.projectedAchievement), gT = growthTone(row.momGrowth);
+    const rh = disp(row.regionalHead) !== "—" ? "regionalHead" : "leader";
+    const rank = (list) => {
+      const ranked = list.filter((r) => isNum(r.projectedAchievement)).sort((x, y) => y.projectedAchievement - x.projectedAchievement), i = ranked.findIndex((r) => r.code === row.code);
+      return i < 0 ? "—" : `${int(i + 1)} of ${int(ranked.length)}`;
+    };
+    const meter = (label, value, ratio, tone) => {
+      const sm = Math.max(1.2, isNum(ratio) ? Math.min(ratio, 2) : 0), fill = isNum(ratio) ? (Math.min(ratio, sm) / sm) * 100 : 0;
+      return `<div><div class="hero-row"><dt>${esc(label)}</dt><dd>${esc(value)}</dd></div>
+        <div class="meter" role="img" aria-label="${esc(label)} ${pct0(ratio)}"><i class="${isNum(ratio) ? tone.key : ""}" style="width:${fill.toFixed(1)}%"></i><b style="left:${(100 / sm).toFixed(1)}%" title="Target"></b></div>
+        <div class="meter-scale"><span>0%</span><span>Target 100%</span></div></div>`;
+    };
+    const person = (role, name, id, phone) => {
+      if (disp(name) === "—") return "";
+      const tel = String(phone || "").replace(/[^\d+]/g, "");
+      return `<div class="person"><span>${esc(role)}${id ? " · ID " + esc(id) : ""}</span><strong>${esc(name)}</strong>${tel ? `<a href="tel:${esc(tel)}">${esc(phone)}</a>` : ""}</div>`;
+    };
+    const attrs = [["Format", row.format], ["Store status", row.status], ["PNP status", row.pnpStatus], ["Division", row.division], ["District", row.district], ["Area", row.area],
+      ["Location type", row.locationType], ["Dv / Ds / T", row.cityType], ["Density", row.density], ["Income level", row.incomeLevel], ["Floor type", row.floorType], ["Layout shape", row.layoutShape],
+      ["Floor area", nnum(row.sft) ? int(row.sft) + " sft" : null], ["Launched", row.launchDate ? fdate(row.launchDate) : null]].filter(([, v]) => disp(v) !== "—");
+    const geo = String(row.geoLocation || "");
+    S.lastFocus = document.activeElement;
+    $("#drawerTitle").textContent = `${disp(row.code)} · ${disp(row.outletName)}`;
+    $("#drawerBody").innerHTML = `
+      <p class="muted" style="margin:0">${esc([disp(row.format), [disp(row.district), disp(row.division)].filter((s) => s !== "—").join(", "), disp(row.area)].filter((s) => s && s !== "—").join(" · "))}</p>
+      <div class="stat-grid three">
+        <div class="stat"><small>Actual till date</small><strong>${bdt(row.salesToDate)}</strong><small>Target ${bdt(row.targetToDate)}</small><div>${tchip(tdT, pct0(row.salesAchievement) + " · " + tdT.label)}</div></div>
+        <div class="stat"><small>Projected month-end</small><strong>${bdt(row.projectedSales)}</strong><small>Monthly target ${bdt(row.monthlyTarget)}</small><div>${tchip(pjT, pct0(row.projectedAchievement) + " · " + pjT.label)}</div></div>
+        <div class="stat"><small>${esc(lm)} sales</small><strong>${bdt(row.lastMonthSales)}</strong><small>${nnum(row.lastMonthSales) === null ? "No baseline for this outlet" : "Change " + bdt(row.projectedVsLastMonth)}</small><div>${tchip(gT, nnum(row.momGrowth) === null ? "No base" : spct(row.momGrowth) + " · " + gT.label)}</div></div>
+      </div>
+      <div><div class="section-title">Against target</div><dl style="margin:0;display:grid;gap:14px">
+        ${meter("Till date", `${bdt(row.salesToDate)} of ${bdt(row.targetToDate)} · ${pct0(row.salesAchievement)}`, row.salesAchievement, tdT)}
+        ${meter("Projected month-end", `${bdt(row.projectedSales)} of ${bdt(row.monthlyTarget)} · ${pct0(row.projectedAchievement)}`, row.projectedAchievement, pjT)}</dl></div>
+      <div><div class="section-title">Daily sales against daily target · ${esc(fmonth(S.net.month))}</div>
+        <div class="chart-legend"><span><i class="swatch" style="background:var(--good)"></i>At or above target</span><span><i class="swatch" style="background:var(--bad)"></i>Below target</span><span><i class="swatch" style="background:var(--ink-2)"></i>Daily target</span></div>
+        <div id="profileDaily" class="chart"></div></div>
+      <div><div class="section-title">Rank by projected achievement, best first</div>
+        <table class="compact"><thead><tr><th>Within</th><th class="num">Rank</th></tr></thead><tbody>
+        <tr><td>All outlets in view</td><td class="num">${rank(pool)}</td></tr>
+        <tr><td>${esc(disp(row[rh]))}'s portfolio</td><td class="num">${rank(pool.filter((r) => disp(r[rh]) === disp(row[rh])))}</td></tr>
+        <tr><td>${esc(disp(row.zonal))}'s zone</td><td class="num">${rank(pool.filter((r) => disp(r.zonal) === disp(row.zonal)))}</td></tr>
+        <tr><td>${esc(disp(row.format))} outlets</td><td class="num">${rank(pool.filter((r) => disp(r.format) === disp(row.format)))}</td></tr></tbody></table></div>
+      <div><div class="section-title">People</div><div class="people">${person("Regional head", disp(row.regionalHead) !== "—" ? row.regionalHead : row.leader, row.rhoId, row.rhoPhone)}${person("Zonal", row.zonal, row.zonalId, row.zonalPhone)}</div></div>
+      <div><div class="section-title">Outlet details</div><dl class="kv">${attrs.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(disp(v))}</dd>`).join("")}
+        ${/^https?:\/\//i.test(geo) ? `<dt>Map</dt><dd><a href="${esc(geo)}" target="_blank" rel="noopener">Open location ↗</a></dd>` : ""}</dl></div>`;
+    showDrawer();
+    requestAnimationFrame(() => drawDaily(row));
+  }
+  function drawDaily(row) {
+    const host = $("#profileDaily");
+    if (!host) return;
+    const month = S.net.month, days = monthDays(month + "-01"), t = row.dailySalesTargets || {}, a = row.dailySalesActuals || {}, series = [];
+    for (let dd = 1; dd <= days; dd++) { const iso = `${month}-${String(dd).padStart(2, "0")}`; series.push({ d: dd, iso, target: nnum(t[iso]), actual: iso <= (S.netTo || "") ? nnum(a[iso]) : null }); }
+    if (!series.some((s) => s.target || s.actual)) { host.innerHTML = '<p class="net-empty">No daily target or sales for this outlet.</p>'; return; }
+    const max = Math.max(1, ...series.map((s) => Math.max(s.target || 0, s.actual || 0))) * 1.1, P = palette();
+    const W = Math.max(280, Math.round(host.clientWidth || 480)), H = 150, pad = { t: 8, r: 4, b: 22, l: 44 };
+    const pw = W - pad.l - pad.r, ph = H - pad.t - pad.b, slot = pw / days, bw = Math.max(3, slot * 0.62), yv = (v) => pad.t + ph - (v / max) * ph;
+    const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, height: H, role: "img", "aria-label": "Daily sales against daily target" });
+    [0, 0.5, 1].forEach((f) => {
+      const v = (max / 1.1) * f, gy = yv(v);
+      svg.append(svgEl("line", { x1: pad.l, x2: W - pad.r, y1: gy, y2: gy, stroke: P("--grid") }));
+      const l = svgEl("text", { x: pad.l - 6, y: gy + 3.5, "text-anchor": "end", fill: P("--ink-3"), "font-size": 10.5 }); l.textContent = compact(v); svg.append(l);
+    });
+    series.forEach((s) => {
+      const x = pad.l + (s.d - 1) * slot + (slot - bw) / 2;
+      if (s.actual != null) {
+        const r = svgEl("rect", { x, y: yv(s.actual), width: bw, height: Math.max(1, pad.t + ph - yv(s.actual)), rx: 1.5, fill: !s.target || s.actual >= s.target ? P("--good") : P("--bad") });
+        const tt = svgEl("title"); tt.textContent = `${fdate(s.iso)} · sales ${bdt(s.actual)} · target ${bdt(s.target)}`; r.append(tt); svg.append(r);
+      }
+      if (s.target) svg.append(svgEl("line", { x1: x - 1, x2: x + bw + 1, y1: yv(s.target), y2: yv(s.target), stroke: P("--ink-2"), "stroke-width": 1.6 }));
+      if (s.d === 1 || s.d === days || s.d % 5 === 0) {
+        const l = svgEl("text", { x: x + bw / 2, y: H - 6, "text-anchor": s.d === 1 ? "start" : s.d === days ? "end" : "middle", fill: P("--ink-3"), "font-size": 10.5 }); l.textContent = String(s.d); svg.append(l);
+      }
+    });
+    host.replaceChildren(svg);
+  }
+
+  // ---- Regional head summary report: A4 landscape, print to PDF or download PNG. Built from whatever
+  // is filtered, on a fixed print palette (assets/report.css) so it looks the same from either theme.
+  function el(tag, cls, text) { const n = document.createElement(tag); if (cls) n.className = cls; if (text !== undefined) n.textContent = text; return n; }
+  function rpTile(label, value, note, tone) {
+    const d = el("div", "rp-tile" + (tone ? " " + tone : "")), dd = el("dd", tone === "pos" || tone === "neg" ? tone : null, value);
+    d.append(el("dt", null, label), dd);
+    if (note) dd.append(el("small", null, note));
+    return d;
+  }
+  function rpMeter(label, value, ratio, tone) {
+    const w = el("div", "rp-meter-row"), bar = el("div", "rp-meter"), fill = el("i", tone);
+    w.append(el("span", "lbl", label), el("span", "val", value));
+    fill.style.width = Math.max(0, Math.min(100, (ratio || 0) * 100)) + "%";
+    bar.append(fill);
+    if (ratio != null) { const m = el("span", "mark"); m.style.left = "100%"; bar.append(m); }
+    w.append(bar);
+    return w;
+  }
+  function rpTable(headers, rows) {
+    const t = el("table", "rp-table"), hr = el("tr"), tb = el("tbody"), th = el("thead");
+    headers.forEach((h) => hr.append(el("th", h.c ? "c" : null, h.label ?? h)));
+    th.append(hr);
+    rows.forEach((r) => {
+      const tr = el("tr");
+      r.forEach((c) => { const td = el("td", c && c.cls ? c.cls : null); if (c && c.html) td.innerHTML = c.html; else td.textContent = c && c.text !== undefined ? c.text : c; if (c && c.title) td.title = c.title; tr.append(td); });
+      tb.append(tr);
+    });
+    t.append(th, tb);
+    return t;
+  }
+  // Achievement is a three-state judgement, not pass/fail: 96% must not print like a failure.
+  const achCls = (v) => { const k = perfTone(v).key; return k === "good" ? "pos" : k === "warn" ? "warn" : "neg"; };
+  const tileTone = (v) => (achCls(v) === "warn" ? "neu" : achCls(v));
+  function buildReport(list) {
+    const sheet = $("#reportSheet"), lm = netLM(), rm = S.net.month;
+    sheet.replaceChildren();
+    const groups = netGroup(list, "regionalHead", true).map((x) => ({ ...x, quad: quadOf(x.mom ?? 0, x.projectedAchievement ?? 0) })).sort((x, y) => y.projected - x.projected);
+    const generated = new Date().toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+    const active = dims().filter(([k]) => S.filters[k].size).map(([k, label]) => `${label}: ${[...S.filters[k]].join(", ")}`);
+    const filterText = active.length ? active.join(" · ") : "None, full network";
+    // Page numbers are stamped at the end, once the page count is known.
+    const foot = () => { const f = el("div", "rp-foot"); f.append(el("span", null, `Operations Dashboard · Growth & momentum · Generated ${generated}`), el("span", "rp-pageno")); return f; };
+    const topline = (right) => { const t = el("div", "rp-topline"), l = el("span"); l.append(el("b", null, "OUTLET NETWORK"), document.createTextNode("  ·  Growth & momentum")); t.append(l, el("span", null, right)); return t; };
+    const oname = (r) => outletLabel(r);
+
+    const p1 = el("section", "report-page"), hero = el("div", "rp-hero"), meta = el("div", "meta");
+    hero.append(el("p", "kicker", "Regional Head Summary Report"), el("h1", null, "Growth & momentum"), el("h2", null, `${fmonth(rm)} · sales through ${fdate(S.netTo)}`));
+    [["Outlets", int(list.length)], ["Regional heads", int(groups.length)], ["Baseline", lm], ["Generated", generated], ["Filters", filterText]].forEach(([k, v]) => { const s = el("span"); s.append(document.createTextNode(k + " "), el("b", null, v)); meta.append(s); });
+    hero.append(meta); p1.append(hero);
+    const tt = nsum(list, "monthlyTarget"), td = nsum(list, "targetToDate"), ad = nsum(list, "salesToDate"), pj = nsum(list, "projectedSales"), b = baseTotals(list);
+    const projAch = tt ? pj / tt : null, tdAch = td ? ad / td : null;
+    const s1 = el("section", "rp-section"), h1 = el("h3", "rp-h", "Network position"), tiles = el("div", "rp-tiles six");
+    h1.append(el("span", null, "Projection model: observed Friday / Saturday / Sun–Thu run rates"));
+    tiles.append(rpTile("Total target", bdt(tt), `${bdt(td)} due till date`), rpTile("Total actual (TD)", bdt(ad), `${npct(tdAch)} of till-date target`, tdAch >= 1 ? "pos" : "neg"),
+      rpTile(lm, bdt(b.lastTotal), `${int(b.withBase.length)} outlets with a base`), rpTile("Projected month-end", bdt(pj), `${bdt(pj - tt)} vs target`, pj >= tt ? "pos" : "neg"),
+      rpTile("MoM growth", spct(b.growth), `${bdt(b.projOnBase - b.lastTotal)} change`, b.growth >= 0 ? "pos" : "neg"), rpTile("Projected achievement", npct(projAch), perfTone(projAch).label, tileTone(projAch)));
+    s1.append(h1, tiles); p1.append(s1);
+    const s2 = el("section", "rp-section"), h2 = el("h3", "rp-h", "Regional head ranking");
+    h2.append(el("span", null, Object.values(QUADS).map((q) => `${q.glyph} ${q.label} ${int(groups.filter((x) => x.quad.key === q.key).length)}`).join("   ·   ")));
+    s2.append(h2, rpTable(["Regional head", "Outlets", "Monthly target", "Target (TD)", "Actual (TD)", "Ach. (TD)", lm, "Projected", "Proj. ach.", "MoM change", "MoM", { label: "Momentum", c: true }],
+      groups.map((x) => [x.name, int(x.outlets), bdt(x.monthlyTarget), bdt(x.target), bdt(x.actual), { text: npct(x.achievement), cls: achCls(x.achievement) }, bdt(x.lastMonth || null), bdt(x.projected),
+        { text: npct(x.projectedAchievement), cls: achCls(x.projectedAchievement) }, { text: bdt(x.delta), cls: (x.delta || 0) >= 0 ? "pos" : "neg" }, { text: spct(x.mom), cls: (x.mom || 0) >= 0 ? "pos" : "neg" },
+        { html: `<span class="rp-pill ${x.quad.key === "accelerating" ? "good" : x.quad.key === "atrisk" ? "bad" : "watch"}">${x.quad.glyph} ${x.quad.label}</span>`, cls: "c" }])));
+    p1.append(s2);
+    // Fill the rest of the cover with network-level outlet movers so page 1 stands alone as a summary.
+    const mv = list.filter((r) => r.lastMonthSales && nnum(r.projectedVsLastMonth) !== null).sort((x, y) => y.projectedVsLastMonth - x.projectedVsLastMonth);
+    const buildMovers = (count) => {
+      const gain = mv.slice(0, count).filter((r) => r.projectedVsLastMonth > 0), loss = mv.slice(-count).reverse().filter((r) => r.projectedVsLastMonth < 0);
+      const sec = el("section", "rp-section"), h = el("h3", "rp-h", "Network movers"), cols = el("div", "rp-cols");
+      h.append(el("span", null, `largest outlet-level swings against ${lm}`));
+      const rows = (l) => l.map((r) => [{ text: oname(r), title: oname(r) }, { text: disp(r.leader || r.regionalHead), cls: "muted" }, bdt(r.lastMonthSales), { text: bdt(r.projectedVsLastMonth), cls: r.projectedVsLastMonth >= 0 ? "pos" : "neg" }, { text: spct(r.momGrowth), cls: (r.momGrowth || 0) >= 0 ? "pos" : "neg" }]);
+      const hd = ["Outlet", "RHO", lm, "Change", "MoM"], gw = el("div"), lw = el("div");
+      gw.append(el("h3", "rp-h", `▲ Top ${int(gain.length)} gainers`), gain.length ? rpTable(hd, rows(gain)) : el("div", "rp-empty", "No outlet is projected above its last-month sales."));
+      lw.append(el("h3", "rp-h", `▼ Steepest ${int(loss.length)} declines`), loss.length ? rpTable(hd, rows(loss)) : el("div", "rp-empty", "No outlet is projected below its last-month sales."));
+      cols.append(gw, lw); sec.append(h, cols);
+      return sec;
+    };
+    const moversSec = mv.length ? buildMovers(6) : null;
+    if (moversSec) p1.append(moversSec);
+    p1.append(foot()); sheet.append(p1);
+    // A4 landscape at 96 dpi: if the movers push the cover past one page, move them to a page of their own.
+    const PAGE_H = 794, CLEAR = 30, contentH = (n) => { const prev = n.style.minHeight; n.style.minHeight = "0"; const h = n.offsetHeight; n.style.minHeight = prev; return h; };
+    if (moversSec && contentH(p1) + CLEAR > PAGE_H) {
+      moversSec.remove();
+      const spill = el("section", "report-page");
+      spill.append(topline(`${fmonth(rm)} · Network movers`), buildMovers(14), foot());
+      sheet.append(spill);
+    }
+    groups.forEach((gr, i) => {
+      const page = el("section", "report-page"), head = el("div", "rp-head"), who = el("div", "rp-who"), whoText = el("div");
+      page.append(topline(`${fmonth(rm)} · Regional head ${i + 1} of ${groups.length}`));
+      const divs = [...new Set(gr.rows.map((r) => disp(r.division)).filter((v) => v !== "—"))], zon = [...new Set(gr.rows.map((r) => disp(r.zonal)).filter((v) => v !== "—"))];
+      whoText.append(el("h1", null, gr.name), el("p", null, `${int(gr.outlets)} outlets · ${int(zon.length)} zonal${zon.length === 1 ? "" : "s"} · ` + (divs.slice(0, 4).join(", ") || "no division recorded") + (divs.length > 4 ? ` +${divs.length - 4} more` : "")));
+      who.append(el("div", "rp-rank", String(i + 1)), whoText);
+      head.append(who, el("span", "rp-chip " + (gr.quad.key === "accelerating" ? "good" : gr.quad.key === "atrisk" ? "bad" : gr.quad.key === "holding" ? "info" : "watch"), `${gr.quad.glyph} ${gr.quad.label}`));
+      page.append(head);
+      const ts = el("section", "rp-section"), g1 = el("div", "rp-tiles"), g2 = el("div", "rp-tiles");
+      g1.append(rpTile("Monthly target", bdt(gr.monthlyTarget)), rpTile("Target till date", bdt(gr.target)), rpTile("Actual till date", bdt(gr.actual), bdt(gr.actual - gr.target) + " gap", gr.actual >= gr.target ? "pos" : "neg"),
+        rpTile("Achievement till date", npct(gr.achievement), perfTone(gr.achievement).label, tileTone(gr.achievement)));
+      g2.style.marginTop = "6px";
+      g2.append(rpTile(lm + " sales", bdt(gr.lastMonth || null), `${int(gr.hasBase)} of ${int(gr.outlets)} with a base`), rpTile("Projected month-end", bdt(gr.projected), bdt(gr.projected - gr.monthlyTarget) + " vs target", gr.projected >= gr.monthlyTarget ? "pos" : "neg"),
+        rpTile("MoM change", bdt(gr.delta), "versus " + lm, (gr.delta || 0) >= 0 ? "pos" : "neg"), rpTile("MoM growth", spct(gr.mom), growthTone(gr.mom).label, (gr.mom || 0) >= 0 ? "pos" : "neg"));
+      ts.append(g1, g2); page.append(ts);
+      const ms = el("section", "rp-section"), meters = el("div", "rp-meters"), mt = (v) => ({ good: "pos", bad: "neg" }[perfTone(v).key] || "neu");
+      meters.append(rpMeter("Actual vs target, till date", `${bdt(gr.actual)} / ${bdt(gr.target)} · ${npct(gr.achievement)}`, gr.achievement, mt(gr.achievement)),
+        rpMeter("Projected vs monthly target", `${bdt(gr.projected)} / ${bdt(gr.monthlyTarget)} · ${npct(gr.projectedAchievement)}`, gr.projectedAchievement, mt(gr.projectedAchievement)));
+      ms.append(el("h3", "rp-h", "Progress"), meters); page.append(ms);
+      const cols = el("div", "rp-cols"), left = el("div"), right = el("div");
+      const top = gr.rows.slice().sort((x, y) => (nnum(y.projectedSales) || 0) - (nnum(x.projectedSales) || 0)).slice(0, 10);
+      const lh = el("h3", "rp-h", "Largest outlets by projected sales"); lh.append(el("span", null, `top ${int(top.length)} of ${int(gr.outlets)}`));
+      left.append(lh, rpTable(["Outlet", lm, "Projected", "MoM", "Proj. ach."], top.map((r) => [{ text: oname(r), title: oname(r) }, bdt(r.lastMonthSales), bdt(r.projectedSales), { text: spct(r.momGrowth), cls: (r.momGrowth || 0) >= 0 ? "pos" : "neg" }, { text: npct(r.projectedAchievement), cls: achCls(r.projectedAchievement) }])));
+      const allRisk = gr.rows.filter((r) => nnum(r.momGrowth) !== null && r.momGrowth < -0.02 && nnum(r.projectedAchievement) !== null && r.projectedAchievement < 1).sort((x, y) => (nnum(x.projectedGap) || 0) - (nnum(y.projectedGap) || 0));
+      const risk = allRisk.slice(0, 10), rh = el("h3", "rp-h", "Needs attention");
+      rh.append(el("span", null, "declining and below monthly target")); right.append(rh);
+      if (risk.length) {
+        right.append(rpTable(["Outlet", lm, "Projected", "MoM", "Target gap"], risk.map((r) => [{ text: oname(r), title: oname(r) }, bdt(r.lastMonthSales), bdt(r.projectedSales), { text: spct(r.momGrowth), cls: "neg" }, { text: bdt(r.projectedGap), cls: "neg" }])));
+        if (allRisk.length > risk.length) { const more = el("p", null, `Showing the 10 largest gaps of ${int(allRisk.length)} outlets in this state.`); more.style.cssText = "margin:5px 0 0;font-size:7.5px;color:#6b8395"; right.append(more); }
+      } else right.append(el("div", "rp-empty", "No outlet in this portfolio is both declining month-on-month and behind its monthly target."));
+      cols.append(left, right); page.append(cols, foot()); sheet.append(page);
+    });
+    const pages = [...sheet.querySelectorAll(".report-page")];
+    pages.forEach((pg, i) => { const s = pg.querySelector(".rp-pageno"); if (s) s.textContent = `Page ${i + 1} of ${pages.length}`; });
+    $("#reportMeta").textContent = `${fmonth(rm)} · ${int(groups.length)} regional heads · ${int(list.length)} outlets · ${pages.length} pages · Filters: ${filterText}`;
+  }
+  function openReport() {
+    // Open first: the layout has to be live for the page-fit measurement to work.
+    $("#reportOverlay").classList.add("is-open");
+    document.body.style.overflow = "hidden";
+    buildReport(inView());
+    $("#reportOverlay").scrollTop = 0;
+    $("#reportClose").focus();
+  }
+  function closeReport() {
+    if (!$("#reportOverlay").classList.contains("is-open")) return false;
+    $("#reportOverlay").classList.remove("is-open");
+    document.body.style.overflow = "";
+    return true;
+  }
+  let h2cPromise = null;
+  const loadH2C = () => (h2cPromise = h2cPromise || new Promise((ok, fail) => { const s = document.createElement("script"); s.src = "assets/vendor/html2canvas.min.js"; s.onload = ok; s.onerror = () => { h2cPromise = null; fail(new Error("load")); }; document.head.append(s); }));
+  async function reportPng() {
+    const busy = $("#reportBusy"), btn = $("#reportPng");
+    busy.hidden = false; btn.disabled = true;
+    try {
+      await loadH2C();
+      const pages = [...document.querySelectorAll("#reportSheet .report-page")], pageH = pages[0].offsetHeight, pageW = pages[0].offsetWidth;
+      // Browsers cap canvases near 16384px a side, so scale to fit and split into parts if even 1x overflows.
+      const MAX = 16000, scale = Math.max(1, Math.min(2, MAX / (pageH * pages.length))), perPart = Math.max(1, Math.floor(MAX / (pageH * scale))), shots = [];
+      for (const p of pages) shots.push(await window.html2canvas(p, { scale, backgroundColor: "#ffffff", logging: false, useCORS: true, windowWidth: pageW }));
+      const parts = [];
+      for (let i = 0; i < shots.length; i += perPart) parts.push(shots.slice(i, i + perPart));
+      for (let pi = 0; pi < parts.length; pi++) {
+        const grp = parts[pi], c = document.createElement("canvas");
+        c.width = grp[0].width; c.height = grp.reduce((s, x) => s + x.height, 0);
+        const ctx = c.getContext("2d");
+        ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, c.width, c.height);
+        let y = 0;
+        grp.forEach((x) => { ctx.drawImage(x, 0, y); y += x.height; });
+        const blob = await new Promise((res) => c.toBlob(res, "image/png")), url = URL.createObjectURL(blob), a = document.createElement("a");
+        a.href = url; a.download = `rho-summary-report_${S.netTo}${parts.length > 1 ? "-part" + (pi + 1) : ""}.png`;
+        document.body.append(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 2000);
+      }
+    } catch (e) {
+      console.error(e);
+      $("#reportMeta").textContent = 'Could not render the image. Use "Print or save as PDF" instead.';
+    } finally { busy.hidden = true; btn.disabled = false; }
+  }
+
+  function netFilesPanel() {
+    const head = `<div class="panel-head"><div><h2>Outlet network files</h2><p>Feed the Outlet network and Growth & momentum pages. Recognised by their layout, so filenames can change.</p></div>`;
+    if (!S.net) {
+      loadNet();
+      return `<section class="panel">${head}</div><div class="panel-body"><p class="muted" style="margin:0">${S.netErr ? `network.json could not be loaded (${esc(S.netErr)}).` : "Loading…"}</p></div></section>`;
+    }
+    const src = S.net.source || {}, files = src.drive?.files || {}, used = src.sourceFiles || {};
+    const roles = [["outletMaster", "Outlet master"], ["dayWiseTarget", "Day-wise target"], ["dayWiseSales", "Day-wise sales"], ["lastMonth", "Last month (SPLY)"]];
+    return `<section class="panel">${head}${src.drive?.folderUrl ? `<div class="panel-tools"><a class="btn" href="${esc(src.drive.folderUrl)}" target="_blank" rel="noopener">Open Drive folder</a></div>` : ""}</div>
+      <div class="table-wrap"><table><thead><tr><th>File</th><th>Type</th><th>Data</th></tr></thead><tbody>
+      ${roles.map(([k, t]) => `<tr><td class="cell-primary">${esc(files[k] || used[k] || "—")}</td><td>${esc(t)}</td><td>${k === "dayWiseSales" ? `Sales through ${fdate(src.salesThroughDate)}` : k === "dayWiseTarget" ? fmonth(src.reportMonth || S.net.month) : k === "lastMonth" ? (src.lastMonth?.monthLabel ? `${esc(src.lastMonth.monthLabel)}, ${int(src.lastMonth.matchedOutlets)} outlets matched` : "Not in the folder, so last-month figures show as —") : `${int(S.net.rows.length)} outlets`}</td></tr>`).join("")}
+      </tbody></table></div>
+      <div class="panel-body"><p class="muted" style="margin:0;max-width:78ch">Put the four workbooks directly in the outlet network Drive folder, shared as "Anyone with the link". The same hourly refresh picks them up${driveNote() ? `; last synced ${esc(driveNote())}` : ""}. If a required workbook is missing or broken, the pages keep the last good data.</p></div></section>`;
+  }
+
+  function wireNet(root) {
+    $$("[data-ndrill]", root).forEach((n) => {
+      const go = (e) => { e.stopPropagation(); NDRILL.get(n.dataset.ndrill)?.(); };
+      n.onclick = go;
+      if (n.tagName === "TR") n.onkeydown = (e) => { if (e.key === "Enter") go(e); };
+    });
+    $$("[data-ndrill-clear]", root).forEach((b) => (b.onclick = () => { S.on.drill = null; render(); }));
+    $$("[data-noutlet]", root).forEach((n) => { n.onclick = () => openNetOutlet(n.dataset.noutlet); n.onkeydown = (e) => { if (e.key === "Enter") openNetOutlet(n.dataset.noutlet); }; });
+    $$("[data-nset]", root).forEach((b) => (b.onclick = () => {
+      const [a, k] = b.dataset.nset.split(".");
+      if (a === "netm") S.netMode = b.dataset.val; else S[a][k] = b.dataset.val;
+      render();
+    }));
+    $$("[data-nsel]", root).forEach((s) => (s.onchange = () => { const [a, k] = s.dataset.nsel.split("."); S[a][k] = s.value; render(); }));
+    $$("[data-ndate]", root).forEach((inp) => (inp.onchange = () => {
+      if (!inp.value) return;
+      S[inp.dataset.ndate] = inp.value;
+      if (S.netFrom > S.netTo) S.netFrom = S.netTo.slice(0, 8) + "01";
+      changed();
+    }));
+    $$("[data-ncsv]", root).forEach((b) => (b.onclick = () => { const f = NCSV[b.dataset.ncsv]; if (f) saveCsv(...f()); }));
+    $$("[data-nreport]", root).forEach((b) => (b.onclick = openReport));
+  }
+
   // ------------------------------------------------------------------ drawer
   function openOutlet(code) {
     const o = rep()?.outlets.find((x) => x.c === code);
@@ -943,7 +2027,8 @@
     $("#filters").hidden = !FILTER_PAGES.has(S.page);
     if (FILTER_PAGES.has(S.page)) renderFilters();
     const p = S.page;
-    const PAGE = { overview: pageOverview, achievement: pageAchievement, growth: pageGrowth, footfall: pageFootfall, ranking: pageRanking, category: pageCategory, loss: pageLoss, performance: pageKPI, dq: pageDQ };
+    const PAGE = { overview: pageOverview, achievement: pageAchievement, growth: pageGrowth, footfall: pageFootfall, ranking: pageRanking, category: pageCategory, loss: pageLoss, performance: pageKPI, dq: pageDQ, on: pageON, gm: pageGM };
+    AFTER = [];
     const html = PAGE[p] ? PAGE[p]() : EMBEDS[p] ? pageEmbed(p) : pageOverview();
     // keep embedded iframes alive when only filters change
     const view = $("#view");
@@ -951,6 +2036,7 @@
     view.dataset.page = p;
     Object.keys(S.tables).forEach((id) => $("#t-" + id) && drawTable(id));
     wireDyn(view);
+    AFTER.forEach((f) => f());
   }
 
   function route() {
@@ -965,12 +2051,22 @@
     const t = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
     document.documentElement.dataset.theme = t;
     try { localStorage.setItem("opsdash-theme", t); } catch (e) {}
+    if (NET_PAGES.has(S.page)) render(); // charts resolve colour tokens when drawn
   });
-  $("#resetBtn").addEventListener("click", () => { DIMS.forEach(([k]) => S.filters[k].clear()); S.bands.clear(); changed(); });
+  $("#resetBtn").addEventListener("click", () => { DIMS.concat(NET_DIMS).forEach(([k]) => S.filters[k].clear()); S.bands.clear(); S.on.drill = null; changed(); });
   $("#menuBtn").addEventListener("click", () => { $("#rail").classList.add("open"); $("#scrim").hidden = false; });
   $("#scrim").addEventListener("click", () => { closeDrawer(); closeRail(); });
   $("#drawerClose").addEventListener("click", closeDrawer);
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeDrawer(); closeRail(); } });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !closeReport()) { closeDrawer(); closeRail(); } });
+  $("#reportClose").addEventListener("click", closeReport);
+  $("#reportPrint").addEventListener("click", () => window.print());
+  $("#reportPng").addEventListener("click", reportPng);
+  // The growth & momentum charts are drawn at their measured width, so redraw when that really changes.
+  new ResizeObserver(() => {
+    const svg = $("#quadrantChart");
+    if (S.page !== "gm" || !svg || Math.abs(svg.parentElement.clientWidth - gmChartWidth) < 12) return;
+    render();
+  }).observe($("#view"));
   document.addEventListener("click", (e) => { if (S.openDim && !e.target.closest(".ms")) { S.openDim = null; renderFilters(); } }, true);
   window.addEventListener("hashchange", route);
 
