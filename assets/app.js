@@ -7,17 +7,22 @@
 
   // ------------------------------------------------------------------ config
   const NAV = [
-    { group: "Sales", items: [["overview", "Overview"], ["achievement", "Sales achievement"], ["growth", "Sales growth"], ["footfall", "Footfall and basket"], ["ranking", "Growth and degrowth"], ["category", "Category performance"]] },
+    { group: "Sales", items: [["overview", "Overview"], ["achievement", "Sales achievement"], ["growth", "Sales growth"], ["footfall", "Footfall and basket"], ["ranking", "Growth and degrowth"], ["loss", "Loss-making outlets"], ["category", "Category performance"]] },
     { group: "Performance", items: [["performance", "KPI performance"]] },
-    { group: "Connected dashboards", items: [["av", "Availability"], ["cw", "Consumable and wastage"]] },
+    { group: "Connected dashboards", items: [["av", "Availability"], ["cw", "Consumable and wastage"], ["gm", "Growth & momentum"], ["gpva", "GPVA% Tracker"], ["cc", "Credit Card Extra Amount"], ["vc", "Visit Compliance"]] },
     { group: "System", items: [["dq", "Data quality"]] },
   ];
   const TITLES = Object.fromEntries(NAV.flatMap((g) => g.items.map(([k, t]) => [k, t])));
   const SALES_PAGES = new Set(["overview", "achievement", "growth", "footfall", "ranking"]);
   const PERIOD_PAGES = new Set([...SALES_PAGES, "category"]);
+  const FILTER_PAGES = new Set([...SALES_PAGES, "loss"]);
   const EMBEDS = {
     av: { url: "https://operations-t.github.io/AV/", desc: "Core, KVI, promo and e-commerce availability by outlet and SKU." },
     cw: { url: "https://operations-t.github.io/consumable-wastage-n/", desc: "Consumable and wastage cost against target by outlet." },
+    gm: { url: "https://operations-t.github.io/outlet-network-dashboard/", desc: "Outlet network growth and momentum." },
+    gpva: { url: "https://outlet-wise-gpva.shwapno.app/", desc: "Outlet-wise GPVA% tracking." },
+    cc: { url: "https://aftabz-lab.github.io/credit-card-extra-amount/", desc: "Credit card extra amount by outlet." },
+    vc: { url: "https://aftabz-lab.github.io/visit-compliance-dashboard/", desc: "Outlet visit schedules and compliance." },
   };
   const DIMS = [["rl", "Regional leader"], ["zn", "Zonal"], ["div", "Division"], ["dis", "District"], ["fmt", "Outlet format"], ["own", "Ownership"], ["pnp", "PNP status"], ["loc", "Location type"]];
   const LEVELS = [["rl", "Regional leader"], ["zn", "Zonal"], ["div", "Division"], ["dis", "District"], ["fmt", "Outlet format"], ["own", "Ownership"], ["outlet", "Outlet"]];
@@ -29,7 +34,7 @@
   ];
 
   const S = { data: null, page: "overview", period: "tilldate", filters: {}, openDim: null, tables: {}, level: "rl", bands: new Set(), lastFocus: null,
-    cmp: "y", scope: "all", trend: "all", kp: null, kl: "rho", kv: "rank" };
+    cmp: "y", scope: "all", trend: "all", kp: null, kl: "rho", kv: "rank", pm: null, pbasis: "after", pstat: "all", plevel: "rl" };
   DIMS.forEach(([k]) => (S.filters[k] = new Set()));
 
   // ------------------------------------------------------------------ format
@@ -66,20 +71,50 @@
     ["tilldate", "monthend"].forEach((k) => {
       if (!d[k]) return;
       d[k].outlets.forEach((o) => {
-        const m = M[o.c];
-        o.m = m;
-        const miss = o.s > 0 || o.t > 0 ? "Not in outlet master" : "Closed outlets";
-        o.dim = {
-          rl: m?.rl || o.rl || miss, zn: m?.zn || o.zn || miss, div: m?.div || miss, dis: m?.dis || miss,
-          fmt: m?.fmt || miss, own: m?.own || miss, pnp: m?.pnp || miss, loc: m?.loc || miss,
-        };
-        o.nm = m?.n || String(o.name || o.c).replace(new RegExp("^" + o.c + "\\s*-\\s*"), "");
+        mkDim(o, M[o.c], o.s > 0 || o.t > 0 ? "Not in outlet master" : "Closed outlets");
+        o.nm = o.m?.n || String(o.name || o.c).replace(new RegExp("^" + o.c + "\\s*-\\s*"), "");
       });
     });
+    Object.values(d.pnl?.summary || {}).forEach((list) => list.forEach((o) => { mkDim(o, M[o.c], o.s >= 1 ? "Not in outlet master" : "Closed outlets"); o.nm = o.n || o.m?.n || o.c; }));
+  }
+  function mkDim(o, m, miss) {
+    o.m = m;
+    o.dim = {
+      rl: m?.rl || o.rl || miss, zn: m?.zn || o.zn || miss, div: m?.div || miss, dis: m?.dis || miss,
+      fmt: m?.fmt || miss, own: m?.own || miss, pnp: m?.pnp || miss, loc: m?.loc || miss,
+    };
   }
   const rep = () => S.data?.[S.period];
   const matches = (o, skip) => DIMS.every(([k]) => k === skip || !S.filters[k].size || S.filters[k].has(o.dim[k]));
-  const inView = () => (rep()?.outlets || []).filter((o) => matches(o));
+  const baseList = () => (S.page === "loss" ? pnlList() : rep()?.outlets || []);
+  const inView = () => baseList().filter((o) => matches(o));
+  function pnlList() {
+    const P = S.data?.pnl;
+    if (!P) return [];
+    if (S.pm === "ytd" && P.months.length > 1) return pnlYtd();
+    if (!P.summary[S.pm]) S.pm = P.months[P.months.length - 1];
+    return P.summary[S.pm];
+  }
+  let ytdCache = null;
+  function pnlYtd() {
+    if (ytdCache) return ytdCache;
+    const P = S.data.pnl, byC = new Map();
+    P.months.forEach((m) => P.summary[m].forEach((o) => {
+      const x = byC.get(o.c) || { c: o.c, s: 0, gp: 0, oi: 0, ox: 0, g: 0, ofc: 0, p: 0, ff: 0, months: 0 };
+      ["s", "gp", "oi", "ox", "g", "ofc", "p", "ff"].forEach((k) => (x[k] += o[k] || 0));
+      x.months++; x.n = o.n; x.nm = o.nm; x.ld = o.ld; x.sft = o.sft; x.m = o.m; x.dim = o.dim;
+      byC.set(o.c, x);
+    }));
+    byC.forEach((x) => { x.bs = x.ff ? x.s / x.ff : null; if (!(x.s >= 1)) mkDim(x, x.m, "Closed outlets"); });
+    return (ytdCache = [...byC.values()]);
+  }
+  function detailFor(code) {
+    const P = S.data.pnl;
+    if (S.pm !== "ytd") return P.detail?.[S.pm]?.[code] || null;
+    let out = null;
+    P.months.forEach((m) => { const d = P.detail?.[m]?.[code]; if (d) { out = out || d.map(() => 0); d.forEach((v, i) => (out[i] += v || 0)); } });
+    return out;
+  }
 
   function agg(list) {
     const a = { n: list.length, t: 0, a: 0, tn: 0, s: 0, sy: 0, sm: 0, f: 0, fy: 0, fm: 0, gv: 0, gvy: 0, gvm: 0, ssS: 0, ssY: 0, ssn: 0 };
@@ -183,7 +218,7 @@
     $$("#nav [data-page]").forEach((b) => b.addEventListener("click", () => { location.hash = b.dataset.page; closeRail(); }));
   }
   function renderFilters() {
-    const base = rep()?.outlets || [];
+    const base = baseList();
     const el = $("#filters");
     const prevDim = el.querySelector(".ms-panel")?.closest(".ms")?.dataset.dim;
     const same = prevDim === S.openDim;
@@ -220,7 +255,7 @@
       $("[data-all]", panel).addEventListener("click", () => { $$(".ms-opt", list).filter((o) => !o.hidden).forEach((o) => S.filters[k].add($("input", o).value)); changed(); });
       $("[data-clear]", panel).addEventListener("click", () => { S.filters[k].clear(); changed(); });
     }
-    $("#railFoot").innerHTML = rep() ? `${int(inView().length)} of ${int(base.length)} outlets in view` : "";
+    $("#railFoot").innerHTML = base.length ? `${int(inView().length)} of ${int(base.length)} outlets in view` : "";
   }
   function renderPills() {
     const pills = [];
@@ -232,7 +267,7 @@
     $("#pageTitle").textContent = TITLES[S.page] || "Overview";
     const d = S.data, showP = PERIOD_PAGES.has(S.page);
     $("#periodSeg").hidden = !showP;
-    $("#resetBtn").hidden = !SALES_PAGES.has(S.page);
+    $("#resetBtn").hidden = !FILTER_PAGES.has(S.page);
     if (d) {
       const opts = [["tilldate", d.tilldate && `Till ${fdate(d.tilldate.date, true)}`], ["monthend", d.monthend && `Last month, ${fmonth(d.monthend.date)}`]].filter((o) => o[1]);
       $("#periodSeg").innerHTML = opts.map(([k, t]) => `<button aria-pressed="${S.period === k}" data-period="${k}">${esc(t)}</button>`).join("");
@@ -240,7 +275,7 @@
       const g = new Date(d.generated);
       $("#fresh").textContent = "Data updated " + g.toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Dhaka" }).replace("Sept", "Sep");
       const r = rep();
-      $("#scope").textContent = showP && r ? `${r.closed ? "Closed month" : "Month to date"}, ${r.splm_label?.replace(/^Same Day SPLM\s*/i, "") || fdate(r.date)}.${SALES_PAGES.has(S.page) ? ` ${int(inView().length)} outlets in view.` : " Company-wide figures."}` : "";
+      $("#scope").textContent = S.page === "loss" && d.pnl ? `Outlet P&L for ${S.pm === "ytd" ? "the year to date" : fmonth(S.pm || d.pnl.months[d.pnl.months.length - 1])}. ${int(inView().filter((o) => o.s >= 1).length)} trading outlets in view.` : showP && r ? `${r.closed ? "Closed month" : "Month to date"}, ${r.splm_label?.replace(/^Same Day SPLM\s*/i, "") || fdate(r.date)}.${SALES_PAGES.has(S.page) ? ` ${int(inView().length)} outlets in view.` : " Company-wide figures."}` : "";
     }
   }
   function changed() {
@@ -411,6 +446,7 @@
 
   function wireDyn(root) {
     $$("[data-outlet]", root).forEach((tr) => { tr.onclick = () => openOutlet(tr.dataset.outlet); tr.onkeydown = (e) => { if (e.key === "Enter") openOutlet(tr.dataset.outlet); }; });
+    $$("[data-pnl]", root).forEach((tr) => { tr.onclick = () => openPnl(tr.dataset.pnl); tr.onkeydown = (e) => { if (e.key === "Enter") openPnl(tr.dataset.pnl); }; });
     $$("[data-khead]", root).forEach((tr) => { tr.onclick = () => openHead(tr.dataset.khead); tr.onkeydown = (e) => { if (e.key === "Enter") openHead(tr.dataset.khead); }; });
     $$("[data-set]", root).forEach((b) => (b.onclick = () => { S[b.dataset.set] = b.dataset.val; changed(); }));
     $$("[data-sel]", root).forEach((sel) => (sel.onchange = () => { S[sel.dataset.sel] = sel.value; changed(); }));
@@ -664,6 +700,155 @@
     showDrawer();
   }
 
+  // ------------------------------------------------------------------ loss-making outlets (outlet P&L)
+  const AGE_BANDS = [["Under 6 months", 0, 6], ["6 to 12 months", 6, 12], ["1 to 2 years", 12, 24], ["2 years or more", 24, Infinity]];
+  const LOSS_STATUS = {
+    new: { label: "New loss", cls: "bad" }, wide: { label: "Loss widening", cls: "bad" },
+    narrow: { label: "Loss narrowing", cls: "warn" }, first: { label: "No prior month", cls: "idle" }, ytd: { label: "Loss year to date", cls: "bad" },
+  };
+  function pnlCalc(o) {
+    const after = S.pbasis === "after";
+    const ytd = S.pm === "ytd";
+    const pl = after ? o.p : o.g, pl0 = ytd ? null : after ? o.p0 : o.g0;
+    const fixed = (o.ox || 0) + (after ? o.ofc || 0 : 0);
+    const rate = o.s > 0 ? ((o.gp || 0) + (o.oi || 0)) / o.s : null;
+    const be = rate > 0 ? fixed / rate : null;
+    const P = S.data.pnl, [y, m] = (ytd ? P.months[P.months.length - 1] : S.pm).split("-").map(Number);
+    const ld = o.ld || o.m?.ld;
+    let age = null;
+    if (ld) { const [ly, lm] = ld.split("-").map(Number); age = (y - ly) * 12 + (m - lm); }
+    let st = null;
+    const closed = !(o.s >= 1);
+    if (!closed && isNum(pl) && pl < 0) st = ytd ? "ytd" : !isNum(pl0) ? "first" : pl0 >= 0 ? "new" : pl < pl0 ? "wide" : "narrow";
+    return {
+      pl, pl0, chg: isNum(pl) && isNum(pl0) ? pl - pl0 : null, gpp: ratio(o.gp, o.s), oxp: ratio(o.ox, o.s),
+      be, need: isNum(be) && o.s > 0 ? be / o.s - 1 : null, age, st, closed, loss: !closed && isNum(pl) && pl < 0,
+    };
+  }
+  const ageBand = (a) => (a == null ? "Opening date unknown" : AGE_BANDS.find(([, lo, hi]) => a >= lo && a < hi)[0]);
+  const ageTxt = (a) => (a == null ? "—" : a < 12 ? `${a} mo` : `${(a / 12).toFixed(1)} yr`);
+  function pageLoss() {
+    const P = S.data.pnl;
+    if (!P) return `<p class="empty">No outlet P&L file is loaded yet. Add one to the Performance folder.</p>`;
+    pnlList();
+    const ytd = S.pm === "ytd";
+    const every = inView().map((o) => ({ o, ...pnlCalc(o) }));
+    const closedL = every.filter((x) => x.closed), all = every.filter((x) => !x.closed);
+    const losses = all.filter((x) => x.loss);
+    const sum = (arr, k) => arr.reduce((t, x) => t + (x[k] || 0), 0);
+    const totLoss = sum(losses, "pl"), net = sum(all, "pl");
+    const newL = losses.filter((x) => x.st === "new").length, rec = all.filter((x) => !x.loss && isNum(x.pl0) && x.pl0 < 0).length;
+    const young = losses.filter((x) => x.age != null && x.age < 12).length;
+    const basisLbl = S.pbasis === "after" ? "after financing cost" : "before financing cost";
+    const periodName = ytd ? `year to date (${P.months.length} months)` : fmonth(S.pm);
+    const monthSel = `<select class="sel" data-sel="pm" aria-label="Month">${P.months.map((m) => `<option value="${m}" ${m === S.pm ? "selected" : ""}>${fmonth(m)}</option>`).join("")}${P.months.length > 1 ? `<option value="ytd" ${ytd ? "selected" : ""}>Year to date, ${fmonth(P.months[0])} to ${fmonth(P.months[P.months.length - 1])}</option>` : ""}</select>`;
+    const basisSeg = seg("pbasis", [["after", "After financing cost"], ["before", "Before financing cost"]], "P&L basis");
+
+    // age bands
+    const bands = [...AGE_BANDS.map((b) => b[0]), "Opening date unknown"].map((b) => {
+      const inB = all.filter((x) => ageBand(x.age) === b), lB = inB.filter((x) => x.loss);
+      return { b, n: inB.length, l: lB.length, loss: sum(lB, "pl") };
+    }).filter((x) => x.n);
+    const agePanel = `<section class="panel"><div class="panel-head"><div><h2>Loss-making outlets by age</h2><p>New outlets usually lose money while they build up trade.</p></div></div>
+      <div class="table-wrap"><table><thead><tr><th>Outlet age</th><th class="num">Outlets</th><th class="num">Loss-making</th><th class="num">Share</th><th class="num">Total loss</th></tr></thead><tbody>
+      ${bands.map((x) => `<tr><td class="cell-primary">${esc(x.b)}</td><td class="num">${int(x.n)}</td><td class="num">${int(x.l)}</td><td class="num">${pct(x.l / x.n)}</td><td class="num down">${bdt(x.loss)}</td></tr>`).join("")}
+      </tbody></table></div></section>`;
+
+    // by level
+    const lvls = LEVELS.filter((l) => l[0] !== "outlet");
+    const g = new Map();
+    all.forEach((x) => { const k = x.o.dim[S.plevel]; if (!g.has(k)) g.set(k, []); g.get(k).push(x); });
+    const grpRows = [...g.entries()].map(([k, xs]) => { const l = xs.filter((x) => x.loss); return { key: k, name: k, sub: `${int(xs.length)} outlets`, n: xs.length, l: l.length, share: l.length / xs.length, loss: sum(l, "pl"), net: sum(xs, "pl"), s: xs.reduce((t, x) => t + (x.o.s || 0), 0) }; });
+    const grp = mountTable("loss-grp", {
+      title: `Loss by ${lvls.find((l) => l[0] === S.plevel)[1].toLowerCase()}`, file: `loss_by_${S.plevel}_${S.pm}`, pageSize: 25,
+      desc: (n) => `${int(n)} rows, P&L ${basisLbl}.`, rows: grpRows, key: (x) => x.key, searchText: (x) => x.name, defaultSort: "loss", defaultDir: "asc",
+      tools: `<select class="sel" data-sel="plevel" aria-label="Group by">${lvls.map(([k, t]) => `<option value="${k}" ${S.plevel === k ? "selected" : ""}>${esc(t)}</option>`).join("")}</select>`,
+      cols: [{ k: "name", label: lvls.find((l) => l[0] === S.plevel)[1], fmt: (x) => `<span class="cell-primary">${esc(x.name)}</span><span class="cell-secondary">${esc(x.sub)}</span>`, csv: (x) => x.name, val: (x) => x.name },
+        { k: "l", label: "Loss-making", num: 1, fmt: (x) => int(x.l) }, { k: "share", label: "Share", num: 1, fmt: (x) => pct(x.share), csv: (x) => pcsv(x.share) },
+        { k: "loss", label: "Total loss", num: 1, fmt: (x) => `<span class="down">${bdt(x.loss)}</span>`, csv: (x) => Math.round(x.loss) },
+        { k: "net", label: "Net outlet P/L", num: 1, fmt: (x) => `<span class="${x.net < 0 ? "down" : "up"}">${bdt(x.net)}</span>`, csv: (x) => Math.round(x.net) },
+        { k: "s", label: "Sales", num: 1, fmt: (x) => bdt(x.s), csv: (x) => Math.round(x.s) }],
+    });
+
+    // outlet list
+    let rows = losses.map((x) => ({ key: x.o.c, name: x.o.nm, sub: `${x.o.c}, ${x.o.dim.rl}, ${x.o.dim.zn}`, ...x, s: x.o.s }));
+    if (S.pstat !== "all" && !ytd) rows = rows.filter((x) => x.st === S.pstat);
+    const list = mountTable("loss", {
+      title: `Loss-making outlets, ${periodName}`, file: `loss_making_outlets_${S.pm}`,
+      desc: (n) => `${int(n)} outlets. "Break-even sales" is the sales needed to cover costs at the outlet's current margin. Click a row for the cost breakdown.`,
+      rows, key: (x) => x.key, searchText: (x) => `${x.name} ${x.sub}`, defaultSort: "pl", defaultDir: "asc", rowAttr: (x) => `data-pnl="${esc(x.key)}" tabindex="0"`,
+      tools: ytd ? "" : seg("pstat", [["all", "All"], ["new", "New loss"], ["wide", "Widening"], ["narrow", "Narrowing"]], "Loss status"),
+      cols: [nameCol("outlet"),
+        { k: "age", label: "Age", num: 1, fmt: (x) => ageTxt(x.age), csv: (x) => x.age ?? "" },
+        { k: "s", label: "Sales", num: 1, fmt: (x) => bdt(x.s), csv: (x) => Math.round(x.s || 0) },
+        { k: "gpp", label: "GP margin", num: 1, fmt: (x) => pct(x.gpp), csv: (x) => pcsv(x.gpp) },
+        { k: "oxp", label: "Opex to sales", num: 1, fmt: (x) => pct(x.oxp), csv: (x) => pcsv(x.oxp) },
+        { k: "pl", label: "P/L", num: 1, fmt: (x) => `<strong class="down">${bdt(x.pl)}</strong>`, csv: (x) => Math.round(x.pl) },
+        ...(ytd ? [{ k: "months", label: "Months", num: 1, val: (x) => x.o.months, fmt: (x) => int(x.o.months), csv: (x) => x.o.months }] : []),
+        { k: "pl0", label: "P/L last month", num: 1, fmt: (x) => `<span class="${x.pl0 < 0 ? "down" : "up"}">${bdt(x.pl0)}</span>`, csv: (x) => (isNum(x.pl0) ? Math.round(x.pl0) : "") },
+        { k: "st", label: "Status", val: (x) => x.st, fmt: (x) => chip(LOSS_STATUS[x.st]), csv: (x) => LOSS_STATUS[x.st].label },
+        { k: "need", label: "Break-even sales", num: 1, fmt: (x) => (isNum(x.need) ? `${bdt(x.be)}<span class="cell-secondary">+${pct(x.need, 1)} needed</span>` : '<span class="muted" title="Gross margin plus other income is zero or negative">Not reachable</span>'), csv: (x) => (isNum(x.be) ? Math.round(x.be) : "") }],
+    });
+
+    if (ytd) S.tables.loss.spec.cols = S.tables.loss.spec.cols.filter((c) => c.k !== "pl0");
+    return `<div class="panel-tools">${monthSel}${basisSeg}</div>
+      <div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
+      ${kpi({ hero: true, label: `Loss-making outlets, ${periodName}`, value: int(losses.length), sub: `${chip({ cls: "bad", label: pct(losses.length / (all.length || 1)) + " of outlets" })}<span>of ${int(all.length)} trading outlets, ${basisLbl}</span>`, foot: `<span>Total loss ${bdt(totLoss)}</span><span>Net outlet P/L ${bdt(net)}</span><span>${int(closedL.length)} closed outlets excluded (P/L ${bdt(sum(closedL, "pl"))})</span>`, accent: "var(--bad)" })}
+      ${kpi({ label: "Total loss", value: `<span class="down">${bdt(totLoss)}</span>`, sub: "Sum of loss-making outlets", foot: `<span>Average ${bdt(losses.length ? totLoss / losses.length : null)} per outlet</span>`, accent: "var(--bad)" })}
+      ${ytd ? "" : kpi({ label: "New losses", value: int(newL), sub: "Profitable last month", foot: `<span>Widening ${int(losses.filter((x) => x.st === "wide").length)}, narrowing ${int(losses.filter((x) => x.st === "narrow").length)}</span>`, accent: "var(--warn)" })}
+      ${ytd ? "" : kpi({ label: "Back to profit", value: `<span class="up">${int(rec)}</span>`, sub: "Loss-making last month", foot: "<span>Profitable this month</span>", accent: "var(--good)" })}
+      </div>
+      <p class="muted" style="margin:0">${int(young)} of the ${int(losses.length)} loss-making outlets opened less than a year ago.</p>
+      ${agePanel}${grp}${list}`;
+  }
+  const peerCache = {};
+  function peerMedians(fmt) {
+    const P = S.data.pnl, key = S.pm + "|" + S.pbasis + "|" + fmt;
+    if (peerCache[key]) return peerCache[key];
+    const list = pnlList().filter((o) => (S.pbasis === "after" ? o.p : o.g) >= 0 && o.s >= 1 && detailFor(o.c) && (!fmt || o.dim.fmt === fmt)).map((o) => ({ o, d: detailFor(o.c) }));
+    const med = P.lines.map((_, i) => {
+      const v = list.map(({ o, d }) => (d[i] || 0) / o.s).sort((a, b) => a - b);
+      return v.length ? (v.length % 2 ? v[(v.length - 1) / 2] : (v[v.length / 2 - 1] + v[v.length / 2]) / 2) : null;
+    });
+    return (peerCache[key] = { med, n: list.length });
+  }
+  function openPnl(code) {
+    const P = S.data.pnl, o = pnlList().find((x) => x.c === code);
+    if (!o) return;
+    const x = pnlCalc(o);
+    S.lastFocus = document.activeElement;
+    $("#drawerTitle").textContent = `${o.c} ${o.nm}`;
+    const stat = (l, v, sub = "") => `<div class="stat"><small>${l}</small><strong>${v}</strong>${sub ? `<div style="font-size:12px">${sub}</div>` : ""}</div>`;
+    const det = detailFor(code);
+    let costHtml = '<p class="muted" style="margin:0">No cost breakdown for this outlet in the P&L file.</p>';
+    if (det) {
+      const fmt = o.dim.fmt !== "Not in outlet master" ? o.dim.fmt : null;
+      const peers = peerMedians(fmt);
+      const items = P.lines.map((l, i) => ({ l, v: det[i] || 0, sp: o.s > 0 ? (det[i] || 0) / o.s : null, pm: peers.med[i] }))
+        .filter((c) => c.v !== 0).sort((a, b) => b.v - a.v);
+      costHtml = `<div class="table-wrap" style="max-height:none"><table class="compact"><thead><tr><th>Cost line</th><th class="num">Amount</th><th class="num">% of sales</th><th class="num">Profitable peers</th><th class="num">Difference</th></tr></thead><tbody>
+        ${items.map((c) => { const d = isNum(c.sp) && isNum(c.pm) ? c.sp - c.pm : null; return `<tr><td class="cell-primary">${esc(c.l)}</td><td class="num">${bdt(c.v)}</td><td class="num">${pct(c.sp)}</td><td class="num">${pct(c.pm)}</td><td class="num"><span class="${d > 0.0025 ? "down" : d < -0.0025 ? "up" : "flat"}">${isNum(d) ? pp(d) : "—"}</span></td></tr>`; }).join("")}
+        </tbody></table></div>
+        <p class="muted" style="margin:0;font-size:12px">Peers are the median of ${int(peers.n)} profitable ${fmt ? esc(fmt.toLowerCase()) + " " : ""}outlets. Red lines cost this outlet more than 0.25 pp of sales above its peers.</p>`;
+    }
+    $("#drawerBody").innerHTML = `
+      <div class="stat-grid">
+        ${stat(S.pbasis === "after" ? "P/L after financing cost" : "P/L before financing cost", `<span class="${x.pl < 0 ? "down" : "up"}">${bdt(x.pl)}</span>`, x.closed ? chip({ cls: "idle", label: "Closed outlet" }) : x.st ? chip(LOSS_STATUS[x.st]) : chip({ cls: "good", label: "Profitable" }))}
+        ${S.pm === "ytd" ? stat("Months in P&L", int(o.months), "Year to date") : stat("P/L last month", bdt(x.pl0), `Change ${bdt(x.chg)}`)}
+        ${stat("Sales", bdt(o.s), `${int(o.ff)} customers, bill ${bdt(o.bs)}`)}
+        ${stat("GP margin", pct(x.gpp), `Other income ${bdt(o.oi)}`)}
+        ${stat("Opex", bdt(o.ox), `${pct(x.oxp)} of sales`)}
+        ${stat("Break-even sales", isNum(x.be) ? bdt(x.be) : "Not reachable", isNum(x.need) ? (x.need > 0 ? `+${pct(x.need, 1)} on current sales` : "Already above break-even") : "Margin plus other income is zero or negative")}
+      </div>
+      <dl class="facts">
+        <dt>Regional leader</dt><dd>${esc(o.dim.rl)}</dd><dt>Zonal</dt><dd>${esc(o.dim.zn)}</dd>
+        <dt>Format</dt><dd>${esc(o.dim.fmt)}</dd><dt>Size</dt><dd>${o.sft ? int(o.sft) + " sq ft" : "—"}</dd>
+        <dt>Opened</dt><dd>${o.ld || o.m?.ld ? fdate(o.ld || o.m.ld) + ` (${ageTxt(x.age)})` : "—"}</dd><dt>Financing cost</dt><dd>${bdt(o.ofc)}</dd>
+      </dl>
+      <h3 style="font-size:14px">Where the money goes</h3>${costHtml}`;
+    showDrawer();
+  }
+
   // ------------------------------------------------------------------ drawer
   function openOutlet(code) {
     const o = rep()?.outlets.find((x) => x.c === code);
@@ -707,10 +892,10 @@
   // ------------------------------------------------------------------ render
   function render() {
     renderNav(); renderTop(); renderPills();
-    $("#filters").hidden = !SALES_PAGES.has(S.page);
-    if (SALES_PAGES.has(S.page)) renderFilters();
+    $("#filters").hidden = !FILTER_PAGES.has(S.page);
+    if (FILTER_PAGES.has(S.page)) renderFilters();
     const p = S.page;
-    const PAGE = { overview: pageOverview, achievement: pageAchievement, growth: pageGrowth, footfall: pageFootfall, ranking: pageRanking, category: pageCategory, performance: pageKPI, dq: pageDQ };
+    const PAGE = { overview: pageOverview, achievement: pageAchievement, growth: pageGrowth, footfall: pageFootfall, ranking: pageRanking, category: pageCategory, loss: pageLoss, performance: pageKPI, dq: pageDQ };
     const html = PAGE[p] ? PAGE[p]() : EMBEDS[p] ? pageEmbed(p) : pageOverview();
     // keep embedded iframes alive when only filters change
     const view = $("#view");

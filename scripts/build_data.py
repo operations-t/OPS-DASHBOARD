@@ -132,6 +132,10 @@ def classify(path):
             return "business", (wb, heads)
     for rows in heads.values():
         f = flat(rows)
+        if {"code", "sales revenue", "total outlet level opex"} <= f:
+            return "pnl", (wb, heads)
+    for rows in heads.values():
+        f = flat(rows)
         if "code" in f and "zonal" in f and "format" in f:
             return "master", (wb, heads)
     issue("warn", os.path.basename(path), "Unrecognised file: no known sheet layout found. It was skipped.")
@@ -483,6 +487,74 @@ def merge_kpi(files):
     return out, months
 
 
+# --------------------------------------------------------------------------- outlet P&L
+def parse_pnl(path, wb, heads):
+    src = os.path.basename(path)
+    month, sheet = None, None
+    for t, rows in heads.items():
+        hi = find_header_row(rows, {"code", "sales revenue", "total outlet level opex"})
+        if hi is not None:
+            sheet = (t, hi)
+            for row in rows[:hi]:
+                for v in row:
+                    m = re.search(r"([A-Za-z]{3})[^A-Za-z0-9]*(\d{4})", str(v)) if isinstance(v, str) and "period" in v.lower() else None
+                    if m and m.group(1).lower() in MONTHS:
+                        month = f"{m.group(2)}-{MONTHS[m.group(1).lower()]:02d}"
+            break
+    if not sheet or not month:
+        issue("error", src, "P&L file: summary sheet or 'Period' label not found.")
+        return None
+    t, hi = sheet
+    hdr = [norm(v) for v in heads[t][hi]]
+    def cols(name):
+        return [i for i, h in enumerate(hdr) if h.startswith(name)]
+    ci = {"c": cols("code"), "n": cols("outlet name"), "ld": cols("launching date"), "sft": cols("sft"),
+          "s": cols("sales revenue"), "gp": cols("gp"), "oi": cols("other income"), "ox": cols("total outlet level opex"),
+          "g": cols("outlet level gain/loss"), "ofc": cols("operating financing cost"), "p": cols("outlet level p/(l) after ofc"),
+          "ff": cols("foot fall"), "bs": cols("basket size")}
+    gp_only = [i for i in ci["gp"] if hdr[i] == "gp"]
+    out = []
+    for i, row in enumerate(wb[t].iter_rows(values_only=True)):
+        if i <= hi:
+            continue
+        code = str(row[ci["c"][0]] or "").strip()
+        if not CODE_RE.match(code):
+            continue
+        g = lambda k, n=0: row[ci[k][n]] if len(ci[k]) > n and ci[k][n] < len(row) else None
+        rec = {"c": code, "n": str(g("n") or "").strip(), "s": num(g("s")), "gp": num(row[gp_only[0]]) if gp_only else None,
+               "oi": num(g("oi")), "ox": num(g("ox")), "g": num(g("g")), "ofc": num(g("ofc")), "p": num(g("p")),
+               "g0": num(g("g", 1)), "p0": num(g("p", 1)), "sft": num(g("sft")), "ff": num(g("ff")), "bs": num(g("bs"))}
+        d = as_date(g("ld"))
+        if d:
+            rec["ld"] = d.isoformat()
+        out.append({k: (r(v, 0) if isinstance(v, float) and k not in ("bs",) else r(v, 2) if isinstance(v, float) else v) for k, v in rec.items() if v not in (None, "")})
+    # Transposed detail sheet: line items down column A, one outlet per column
+    lines, detail = [], {}
+    for t2 in heads:
+        top = [list(x) for x in wb[t2].iter_rows(max_row=12, max_col=1, values_only=True)]
+        if not any(norm(x[0]) == "code" for x in top if x):
+            continue
+        grid = [list(x) for x in wb[t2].iter_rows(max_row=80, values_only=True)]
+        crow = next(j for j, x in enumerate(grid) if x and norm(x[0]) == "code")
+        codes = [str(v).strip() if v else "" for v in grid[crow]]
+        labels = [norm(x[0]) for x in grid]
+        try:
+            a, b = labels.index("gpoi"), labels.index("total outlet level opex")
+        except ValueError:
+            continue
+        keep = [j for j in range(a + 1, b) if grid[j][0]]
+        lines = [str(grid[j][0]).strip() for j in keep]
+        for col, code in enumerate(codes):
+            if col and CODE_RE.match(code) and code not in detail:
+                detail[code] = [r(num(grid[j][col]) if col < len(grid[j]) else None, 0) for j in keep]
+        break
+    if not detail:
+        issue("warn", src, "P&L cost breakdown sheet not found; outlet cost details unavailable.")
+    loss = sum(1 for o in out if (o.get("p") or 0) < 0)
+    issue("info", src, f"P&L {month}: {len(out)} outlets, {loss} loss-making after financing cost.")
+    return {"file": src, "month": month, "outlets": out, "lines": lines, "detail": detail}
+
+
 # --------------------------------------------------------------------------- outlet master
 def parse_master(path, wb, heads):
     src = os.path.basename(path)
@@ -537,7 +609,7 @@ def month_end(d):
 
 
 def build(root):
-    found = {"business": [], "kpi": [], "master": []}
+    found = {"business": [], "kpi": [], "master": [], "pnl": []}
     for folder in FOLDERS:
         files = excel_files(os.path.join(root, folder))
         if not files:
@@ -547,7 +619,7 @@ def build(root):
             if not kind:
                 continue
             wb, heads = payload
-            parsed = {"business": parse_business, "kpi": parse_kpi, "master": parse_master}[kind](p, wb, heads)
+            parsed = {"business": parse_business, "kpi": parse_kpi, "master": parse_master, "pnl": parse_pnl}[kind](p, wb, heads)
             wb.close()
             if parsed:
                 parsed["folder"] = folder
@@ -579,6 +651,23 @@ def build(root):
     else:
         issue("warn", "performance", "No KPI performance file found.")
 
+    pnl = None
+    if found["pnl"]:
+        bym = {}
+        for f in found["pnl"]:
+            if f["month"] not in bym or len(f["outlets"]) > len(bym[f["month"]]["outlets"]):
+                bym[f["month"]] = f
+        months = sorted(bym)[-12:]
+        lines = bym[months[-1]]["lines"]
+        detail = {}
+        for m in months:  # align every month's cost lines to the latest month's line list
+            f = bym[m]
+            idx = [f["lines"].index(l) if l in f["lines"] else None for l in lines]
+            detail[m] = {c: [v[i] if i is not None else None for i in idx] for c, v in f["detail"].items()}
+        pnl = {"months": months, "summary": {m: bym[m]["outlets"] for m in months}, "lines": lines, "detail": detail}
+    else:
+        issue("warn", "performance", "No outlet P&L file found; the Loss-making outlets page is empty.")
+
     # join checks
     if master:
         mcodes = {o["c"] for o in master["outlets"]}
@@ -601,9 +690,11 @@ def build(root):
         "tilldate": rep_out(till),
         "monthend": rep_out(me),
         "master": {"file": master["file"], "outlets": master["outlets"]} if master else None,
+        "pnl": pnl,
         "kpi": {"months": kpi_months, "files": [f["file"] for f in found["kpi"]], **kpi},
         "sources": [{"folder": b["folder"], "file": b["file"], "type": "Business report", "date": b["date"].isoformat()} for b in biz]
                    + [{"folder": f["folder"], "file": f["file"], "type": "KPI performance", "date": max(f["months"])} for f in found["kpi"]]
+                   + [{"folder": f["folder"], "file": f["file"], "type": "Outlet P&L", "date": f["month"]} for f in found["pnl"]]
                    + [{"folder": m["folder"], "file": m["file"], "type": "Outlet master", "date": (m["latest_launch"] or dt.date.min).isoformat()} for m in found["master"]],
         "issues": ISSUES,
     }
