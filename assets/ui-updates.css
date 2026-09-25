@@ -1,4 +1,7 @@
 /* Focused dashboard updates; keep the base design system intact. */
+/* Reduce the navigation sidebar width by 10% from 268px. */
+:root{--rail-width:241.2px}
+
 .brand .brand-mark{
   display:block;width:72px;height:36px;flex:0 0 72px;
   object-fit:contain;background:transparent;border-radius:0;
