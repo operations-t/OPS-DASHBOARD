@@ -50,3 +50,10 @@ tr[data-cwoutlet],tr[data-cwcrit]{cursor:pointer}
 .av-rho td.av-red.has{background:var(--bad);color:#fff;font-weight:700}
 .av-rho tr[data-gpick]{cursor:pointer}
 .av-rho tr.av-total td{font-weight:700;border-top:2px solid var(--line);background:var(--surface-2)}
+
+/* Availability: criteria by New Division and CAT3 */
+.av-crit .table-wrap{max-height:760px}
+.av-crit td{padding:5px 10px}
+.av-crit tr.av-div td{font-weight:700;background:var(--surface-2);border-top:1px solid var(--line)}
+.av-crit td.av-band{padding-left:28px;color:var(--ink-2)}
+.av-crit td.av-low{background:var(--bad-soft);color:var(--bad);font-weight:700}

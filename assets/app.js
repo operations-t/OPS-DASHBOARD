@@ -2835,6 +2835,48 @@
       </tbody></table></div></section>`;
   }
 
+  // Availability criteria by product division (outlet bands) and by CAT3 (Core, KVI, Promo). Every figure is
+  // the average of each outlet's own availability within that division or CAT3, as in the RHO matrix.
+  function avCriteria(scan) {
+    const d = S.av, days = avDays(), N = d.S, outs = scan.outs, skus = scan.skus;
+    const nds = [...new Set(skus.map((x) => x.nd || "—"))].sort(), c3s = [...new Set(skus.map((x) => x.cat3 || "—"))];
+    const ndI = new Map(nds.map((x, i) => [x, i])), c3I = new Map(c3s.map((x, i) => [x, i])), TY = ["core", "kvi", "promo"];
+    const ND = nds.length, C3 = c3s.length;
+    const ndOk = new Float64Array(ND), ndSl = new Float64Array(ND), cOk = new Float64Array(C3 * 3), cSl = new Float64Array(C3 * 3);
+    const ndSum = new Float64Array(ND), ndN = new Float64Array(ND), ndBand = nds.map(() => [0, 0, 0, 0, 0]);
+    const cSum = new Float64Array(C3 * 3), cN = new Float64Array(C3 * 3);
+    const skuNd = skus.map((x) => ndI.get(x.nd || "—")), skuC3 = skus.map((x) => c3I.get(x.cat3 || "—"));
+    for (const o of outs) {
+      ndOk.fill(0); ndSl.fill(0); cOk.fill(0); cSl.fill(0);
+      const base = o.i * N;
+      skus.forEach((x, j) => {
+        const ok = AV_OK[avStatus(d.stock[base + x.i], d.sales60[base + x.i], days)] ? 1 : 0;
+        ndSl[skuNd[j]]++; ndOk[skuNd[j]] += ok;
+        TY.forEach((t, ti) => { if (x[t]) { const q = skuC3[j] * 3 + ti; cSl[q]++; cOk[q] += ok; } });
+      });
+      for (let i = 0; i < ND; i++) if (ndSl[i]) { const r = ndOk[i] / ndSl[i]; ndSum[i] += r; ndN[i]++; ndBand[i][avBandIdx(r)]++; }
+      for (let q = 0; q < C3 * 3; q++) if (cSl[q]) { cSum[q] += cOk[q] / cSl[q]; cN[q]++; }
+    }
+    const divRows = nds.map((nd, i) => ({ nd, skus: skus.filter((x) => (x.nd || "—") === nd).length, avg: ndN[i] ? ndSum[i] / ndN[i] : null, bands: ndBand[i] }));
+    const catRows = c3s.map((c, i) => { const v = TY.map((_, ti) => (cN[i * 3 + ti] ? cSum[i * 3 + ti] / cN[i * 3 + ti] : null)); return { c, core: v[0], kvi: v[1], promo: v[2], low: Math.min(...v.filter(isNum)) }; })
+      .sort((a, b) => a.low - b.low || a.c.localeCompare(b.c));
+    const pc = (v) => (isNum(v) ? `${Math.round(v * 100)}%` : "");
+    const red = (v) => (isNum(v) && v < 0.7 ? " av-low" : "");
+    const stamp = d.generatedAt.slice(0, 10);
+    NCSV.avdiv = () => ["availability_by_new_division", ["New Division", "SKUs", "Avg %", ...AV_BANDS], divRows.map((x) => [x.nd, x.skus, isNum(x.avg) ? (x.avg * 100).toFixed(2) : "", ...x.bands]), stamp];
+    NCSV.avcat = () => ["availability_by_cat3", ["CAT3", "Core %", "KVI %", "Promo %"], catRows.map((x) => [x.c, ...["core", "kvi", "promo"].map((t) => (isNum(x[t]) ? (x[t] * 100).toFixed(2) : ""))]), stamp];
+    return `<div class="grid-h av-crit">
+      <section class="panel"><div class="panel-head"><div><h2>Availability criteria (New Division)</h2><p>Average of outlet availability, then outlets in each band.</p></div><div class="panel-tools">${csvBtn("avdiv")}</div></div>
+        <div class="table-wrap"><table><thead><tr><th>Availability criteria (New Division)</th><th class="num">Outlet Qty</th></tr></thead><tbody>
+        ${divRows.map((x) => `<tr class="av-div"><td>${esc(x.nd)} (${int(x.skus)} SKU)</td><td class="num${red(x.avg)}">${pc(x.avg)}</td></tr>
+          ${AV_BANDS.map((b, i) => `<tr><td class="av-band">${b}</td><td class="num">${int(x.bands[i])}</td></tr>`).join("")}`).join("")}
+        </tbody></table></div></section>
+      <section class="panel"><div class="panel-head"><div><h2>Availability criteria (CAT3)</h2><p>Weakest first. Red is below 70%; blank means no SKU of that type in the CAT3.</p></div><div class="panel-tools">${csvBtn("avcat")}</div></div>
+        <div class="table-wrap"><table><thead><tr><th>Availability criteria (CAT3)</th><th class="num">Core %</th><th class="num">KVI %</th><th class="num">Promo %</th></tr></thead><tbody>
+        ${catRows.map((x) => `<tr><td>${esc(x.c)}</td>${["core", "kvi", "promo"].map((t) => `<td class="num${red(x[t])}">${pc(x[t])}</td>`).join("")}</tr>`).join("")}
+        </tbody></table></div></section></div>`;
+  }
+
   // ---- pages
   function pageAVS() {
     const g = avGuard(); if (g) return g;
@@ -2849,6 +2891,7 @@
         ${avCard("E-Commerce", e.tot, "var(--series-4)", `<span>${int(e.byO.size)} outlets · YES assortment only</span>`)}
       </div></div>${avStrip(all.tot)}</section>
       ${avRhoMatrix({ core: c, promo: p, kvi: k, all })}
+      ${avCriteria(all)}
       <div class="grid-h">${avOutletTable("av-sum-o", all, "Lowest outlets", "all", 10)}${avSkuTable("av-sum-s", all, "Lowest SKUs", "all", 10)}</div>`;
   }
   function pageAVType(type) {
