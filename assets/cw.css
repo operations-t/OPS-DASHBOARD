@@ -85,3 +85,17 @@ tr[data-cwoutlet],tr[data-cwcrit]{cursor:pointer}
 .av-bands li span{color:var(--ink-2)}
 .av-bands li b{font-weight:650;font-variant-numeric:tabular-nums}
 .av-bands li.zero b,.av-bands li.zero span{color:var(--ink-3)}
+
+/* criteria cards: one wide card on a single-type page, division grid on the summary */
+.av-cards.single{grid-template-columns:1fr}
+.av-card.wide{display:grid;grid-template-columns:minmax(170px,220px) minmax(0,1fr);gap:8px 28px;align-items:center;padding:16px 18px}
+.av-card.wide .av-card-val{font-size:38px}
+.av-card.wide .av-stack{height:14px}
+.av-card.wide .av-bands{grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin-top:6px}
+.av-card.wide .av-bands li{grid-template-columns:9px 1fr;grid-template-rows:auto auto auto;padding:6px 8px;border:1px solid var(--line-soft)}
+.av-card.wide .av-bands li b{grid-column:1/-1;font-size:18px}
+.av-card.wide .av-bands li small{grid-column:1/-1;font-size:11px;color:var(--ink-3)}
+.av-card-main,.av-card-dist{display:flex;flex-direction:column;gap:6px;min-width:0}
+.av-cards.div{grid-template-columns:repeat(auto-fill,minmax(190px,1fr))}
+.av-cards.div .av-card-val{font-size:24px}
+@media (max-width:760px){.av-card.wide{grid-template-columns:1fr}.av-card.wide .av-bands{grid-template-columns:repeat(2,minmax(0,1fr))}}
