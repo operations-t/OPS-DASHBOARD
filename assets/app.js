@@ -2977,7 +2977,8 @@
           foot: `<div class="bar" style="flex:1 1 100%;margin:2px 0 6px" role="img" aria-label="Availability ${avPct(all.tot)}"><i style="width:${fill}%;background:var(--${b.cls})"></i></div><span>${int(all.outs.length)} outlets · ${int(all.skus.length)} SKUs</span><span>Shortfall ${int(all.tot.short)} units</span>` })}
         ${avCard("Core", c.tot, "var(--series-2)")}${avCard("Promo", p.tot, "var(--series-3)")}${avCard("KVI", k.tot, "var(--series-1)")}
         ${avCard("E-Commerce", e.tot, "var(--series-4)", `<span>${int(e.byO.size)} outlets · YES assortment only</span>`)}
-      </div></div>${avStrip(all.tot)}</section>
+      </div></div></section>
+      ${avTypeCriteria(["core", "promo", "kvi", "all", "ecom"], { core: c, promo: p, kvi: k, all, ecom: e })}
       ${avRhoMatrix({ core: c, promo: p, kvi: k, all })}
       ${avCriteria(all)}
       <div class="grid-h">${avOutletTable("av-sum-o", all, "Lowest outlets", "all", 10)}${avSkuTable("av-sum-s", all, "Lowest SKUs", "all", 10)}</div>`;
@@ -2987,15 +2988,11 @@
     const kviOnly = type === "kvi" && S.avv.kviOnly === "yes";
     const scan = avScan(type, kviOnly), name = AV_TYPES.find((t) => t[0] === type)[1];
     const extra = type === "kvi" ? avSeg("kviOnly", [["no", "All outlets"], ["yes", "KVI outlets only"]], "Outlets") : "";
-    const t = scan.tot, r = avRate(t);
+    const t = scan.tot;
     return `${avBar(extra)}
       <section class="panel"><div class="panel-body"><div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
         ${avCard(`${name} availability`, t, "var(--series-2)", `<span>${int(scan.outs.length)} outlets${kviOnly ? " (KVI outlets)" : ""} · ${int(scan.skus.length)} SKUs</span>`)}
-        ${kpi({ label: "Out of stock", value: int(t.st[2]), sub: `${t.slots ? pct(t.st[2] / t.slots, 1) : "—"} of pairs`, foot: "<span>Selling items with no stock</span>", accent: "var(--bad)" })}
-        ${kpi({ label: "Below cover", value: int(t.st[1]), sub: `${t.slots ? pct(t.st[1] / t.slots, 1) : "—"} of pairs`, foot: `<span>Stock under ${avDays()} day${avDays() === 1 ? "" : "s"} of sales</span>`, accent: "var(--warn)" })}
-        ${kpi({ label: "No sales in 60 days", value: int(t.st[3] + t.st[4]), sub: `${int(t.st[3])} in stock · ${int(t.st[4])} with no stock`, foot: "<span>In stock counts as available</span>", accent: "var(--info)" })}
-        ${kpi({ label: "Shortfall", value: `${int(t.short)} <small>units</small>`, sub: `To reach ${avDays()} day${avDays() === 1 ? "" : "s"} of cover`, foot: `<span>${isNum(r) ? pct(r, 2) : "—"} available</span>`, accent: "var(--series-3)" })}
-      </div></div>${avStrip(t)}</section>
+      </div></div></section>
       ${avTypeCriteria([type], { [type]: scan }, kviOnly)}
       ${avGroupTable(`av-${type}-zn`, scan, "zn", type)}
       ${avOutletTable(`av-${type}-o`, scan, `${name} availability by outlet`, type)}`;
@@ -3003,8 +3000,7 @@
   function pageAVK() {
     const g = avGuard(); if (g) return g;
     const type = S.avv.type, scan = avScan(type);
-    const scans = { core: avScan("core"), promo: avScan("promo"), kvi: avScan("kvi"), all: type === "all" ? scan : avScan("all"), ecom: avEcomScan() };
-    return `${avBar()}${avTypeCriteria(["core", "promo", "kvi", "all", "ecom"], scans)}${avSkuTable("av-sku", scan, "SKU wise availability", type, 50, avSeg("type", AV_TYPES, "SKU type"))}`;
+    return `${avBar()}${avSkuTable("av-sku", scan, "SKU wise availability", type, 50, avSeg("type", AV_TYPES, "SKU type"))}`;
   }
   function pageAVB() {
     const g = avGuard(); if (g) return g;
