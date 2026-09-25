@@ -45,7 +45,7 @@
     net: null, netLoading: false, netErr: null, netMode: "through", netFrom: "", netTo: "",
     gdrill: {},
     cw: null, cwLoading: false, cwErr: null, cwCrit: null,
-    av: null, avLoading: false, avErr: null, avv: { days: "2", nd: "", cat3: "", type: "all", level: "rl", kviOnly: "no" },
+    av: null, avLoading: false, avErr: null, avv: { days: "2", nd: "", cat3: "", type: "all", level: "rl", kviOnly: "no", glevel: "zn", elevel: "outlet" },
     cwv: { from: "", to: "", compare: false, status: "all", statusMetric: "consumableRate", basis: "daily", rankDim: "zone", rankMetric: "consumableRate", moversMetric: "consumableRate", leagueDim: "zone", leagueMetric: "consumableRate", excMetric: "all", benchMetric: "consumableRate" },
     on: { league: "regionalHead", oversight: "regional", launch: "year", cols: "key", drill: null },
     gm: { quad: "regionalHead", mover: "regionalHead", dir: "gain", league: "regionalHead" } };
@@ -397,7 +397,7 @@
   const levelName = (level) => (LEVELS.find((l) => l[0] === level) || [, CW_LEVELS[level] || NET_LEVELS[level] || AV_LEVELS[level] || level])[1];
   function gdrill(id, level) { const d = S.gdrill[id]; return d && d.level === level && level !== "outlet" ? d : null; }
   const gpickAttr = (id, level) => (x) => (x.o ? outletAttr(x) : `data-gpick="${esc(id)}" data-glevel="${esc(level)}" data-gkey="${esc(x.key)}" tabindex="0" title="List ${esc(x.name)}'s outlets"`);
-  const gBanner = (id, d) => (d ? `<div class="drill-banner">Showing the outlets of <strong>${esc(levelName(d.level))}: ${esc(d.key)}</strong> within the sidebar filters. <button type="button" data-gclear="${esc(id)}">Back to all ${esc(levelName(d.level).toLowerCase())}s</button></div>` : "");
+  const gBanner = (id, d) => (d ? `<div class="drill-banner">Showing the outlets of <strong>${esc(AV_PAGES.has(S.page) ? AV_LEVELS[d.level] || levelName(d.level) : levelName(d.level))}: ${esc(d.key === "Not in outlet master" ? "Unassigned" : d.key)}</strong> within the sidebar filters. <button type="button" data-gclear="${esc(id)}">Back to all ${esc(AV_PAGES.has(S.page) && d.level === "rl" ? "RHOs" : (AV_PAGES.has(S.page) ? AV_LEVELS[d.level] || levelName(d.level) : levelName(d.level)).toLowerCase() + "s")}</button></div>` : "");
 
   function pageOverview() {
     const r = rep(), list = inView(), a = agg(list);
@@ -2736,7 +2736,7 @@
   const avOutletFirst = { k: "name", label: "Outlet", val: (x) => x.name, fmt: (x) => `<span class="cell-primary">${esc(x.code)} · ${esc(x.name)}</span><span class="cell-secondary">${esc(x.sub)}</span>`, csv: (x) => `${x.code} ${x.name}` };
   const avSkuFirst = { k: "name", label: "SKU", val: (x) => x.name, fmt: (x) => `<span class="cell-primary">${esc(x.name)}</span><span class="cell-secondary">${esc(x.code)} · ${esc(x.sub)}</span>`, csv: (x) => `${x.code} ${x.name}` };
   const avTypeChips = (s) => ["core", "promo", "kvi"].filter((t) => s[t]).map((t) => t.toUpperCase()).join(", ");
-  const avOutletRows = (scan) => scan.outs.map((o) => ({ ...scan.byO.get(o.i), code: o.c, name: o.n, sub: `${o.dim.zn} · ${o.dim.rl}`, o })).filter((x) => x.slots);
+  const avOutletRows = (scan) => scan.outs.map((o) => ({ ...scan.byO.get(o.i), code: o.c, name: o.n, sub: `${avUnassigned(o.dim.zn)} · ${avUnassigned(o.dim.rl)}`, o })).filter((x) => x.slots);
   const avSkuRows = (scan) => scan.skus.map((s) => ({ ...scan.byS.get(s.i), code: s.c, name: s.n, sub: `${s.nd || "—"} · ${s.cat3 || "—"} · ${avTypeChips(s)}`, s, n: scan.outs.length })).filter((x) => x.slots);
   function avOutletTable(id, scan, title, type, pageSize) {
     return mountTable(id, { title, file: `availability_${id}`, stamp: S.av.generatedAt.slice(0, 10), pageSize: pageSize || 50,
@@ -2751,12 +2751,12 @@
       rowAttr: (x) => `data-avsku="${esc(x.code)}" data-avtype="${type}" tabindex="0"`, cols: avCols(avSkuFirst, "Outlets") });
   }
   // Grouped table (Product division, CAT3, Zonal, Regional leader). Clicking a group lists its outlets or SKUs.
-  const AV_LEVELS = { nd: "Product division", cat3: "CAT3", zn: "Zonal", rl: "Regional leader", outlet: "Outlet" };
-  function avGroupTable(id, scan, level, type) {
+  const AV_LEVELS = { nd: "Product division", cat3: "CAT3", zn: "Zonal", rl: "RHO", outlet: "Outlet" };
+  function avGroupTable(id, scan, level, type, tools = "") {
     const gd = gdrill(id, level);
     if (level === "outlet" || (gd && (level === "zn" || level === "rl"))) {
       const sc = gd ? { ...scan, outs: scan.outs.filter((o) => o.dim[level] === gd.key) } : scan;
-      return mountTable(id, { title: gd ? `Outlets of ${gd.key}` : "Availability by outlet", file: `availability_${id}_outlet`, stamp: S.av.generatedAt.slice(0, 10), banner: gBanner(id, gd),
+      return mountTable(id, { title: gd ? `Outlets of ${avUnassigned(gd.key)}` : "Availability by outlet", file: `availability_${id}_outlet`, stamp: S.av.generatedAt.slice(0, 10), banner: gBanner(id, gd), tools: gd ? "" : tools,
         desc: (n) => `${int(n)} outlets, lowest availability first. Click an outlet for the items it is missing.`,
         rows: avOutletRows(sc), key: (x) => x.code, searchText: (x) => `${x.code} ${x.name} ${x.sub}`, defaultSort: "rate", defaultDir: "asc",
         rowAttr: (x) => `data-avoutlet="${esc(x.code)}" data-avtype="${type}" tabindex="0"`, cols: avCols(avOutletFirst) });
@@ -2773,11 +2773,11 @@
     if (bySku) scan.skus.forEach((s) => put(s[level] || "—", scan.byS.get(s.i), "SKUs"));
     else scan.outs.forEach((o) => put(o.dim[level], scan.byO.get(o.i), "outlets"));
     const rows = [...g.values()].filter((x) => x.slots);
-    return mountTable(id, { title: `Availability by ${AV_LEVELS[level].toLowerCase()}`, file: `availability_${id}_${level}`, stamp: S.av.generatedAt.slice(0, 10),
+    return mountTable(id, { title: `Availability by ${level === "rl" || level === "cat3" ? AV_LEVELS[level] : AV_LEVELS[level].toLowerCase()}`, file: `availability_${id}_${level}`, stamp: S.av.generatedAt.slice(0, 10), tools,
       desc: (n) => `${int(n)} groups, lowest availability first. Group figures are sums of their pairs. Click a group to list its ${bySku ? "SKUs" : "outlets"}.`,
       rows, key: (x) => x.key, searchText: (x) => x.name, defaultSort: "rate", defaultDir: "asc",
       rowAttr: (x) => `data-gpick="${id}" data-glevel="${level}" data-gkey="${esc(x.key)}" tabindex="0" title="List ${esc(x.name)}'s ${bySku ? "SKUs" : "outlets"}"`,
-      cols: avCols({ k: "name", label: AV_LEVELS[level], val: (x) => x.name, fmt: (x) => `<span class="cell-primary">${esc(x.name)}</span>`, csv: (x) => x.name }, bySku ? "SKUs" : "Outlets") });
+      cols: avCols({ k: "name", label: AV_LEVELS[level], val: (x) => x.name, fmt: (x) => `<span class="cell-primary">${esc(avUnassigned(x.name))}</span>`, csv: (x) => avUnassigned(x.name) }, bySku ? "SKUs" : "Outlets") });
   }
 
   // RHO wise overall availability: per regional leader, the average of their outlets' own availability
@@ -2998,7 +2998,7 @@
     const extra = type === "kvi" ? avSeg("kviOnly", [["no", "All outlets"], ["yes", "KVI outlets only"]], "Outlets") : "";
     return `${avBar(extra)}
       ${avTypeCriteria([type], { [type]: scan }, kviOnly)}
-      ${avGroupTable(`av-${type}-zn`, scan, "zn", type)}
+      ${avGroupTable(`av-${type}-zn`, scan, S.avv.glevel, type, avSeg("glevel", [["zn", "Zonal"], ["rl", "RHO"]], "Group by"))}
       ${avOutletTable(`av-${type}-o`, scan, `${name} availability by outlet`, type)}`;
   }
   function pageAVK() {
@@ -3016,13 +3016,31 @@
   function pageAVE() {
     const g = avGuard(); if (g) return g;
     const d = S.av, e = avEcomScan(), t = e.tot;
-    const oRows = [...e.byO].map(([oi, a]) => { const o = d.outlets[oi]; return { ...a, code: o.c, name: o.n, sub: `${o.dim.zn} · ${o.dim.rl}` }; });
-    const stamp = d.generatedAt.slice(0, 10);
+    const stamp = d.generatedAt.slice(0, 10), lv = S.avv.elevel, id = "av-e-o", gd = gdrill(id, lv);
+    const tools = gd ? "" : avSeg("elevel", [["outlet", "Outlet"], ["zn", "Zonal"], ["rl", "RHO"]], "Group by");
+    const outletRows = (keep) => [...e.byO].filter(([oi]) => keep(d.outlets[oi])).map(([oi, a]) => { const o = d.outlets[oi]; return { ...a, code: o.c, name: o.n, sub: `${avUnassigned(o.dim.zn)} · ${avUnassigned(o.dim.rl)}` }; });
+    let table;
+    if (lv === "outlet" || gd) {
+      table = mountTable(id, { title: gd ? `E-Commerce outlets of ${avUnassigned(gd.key)}` : "E-Commerce availability by outlet", file: gd ? `availability_ecom_outlets_${gd.key}` : "availability_ecom_outlets", stamp, banner: gBanner(id, gd), tools,
+        desc: (n) => `${int(n)} outlets, lowest availability first. Click an outlet for its missing items.`,
+        rows: outletRows((o) => !gd || o.dim[lv] === gd.key), key: (x) => x.code, searchText: (x) => `${x.code} ${x.name} ${x.sub}`, defaultSort: "rate", defaultDir: "asc",
+        rowAttr: (x) => `data-avecom="${esc(x.code)}" tabindex="0"`, cols: avCols(avOutletFirst) });
+    } else {
+      const g = new Map();
+      e.byO.forEach((a, oi) => {
+        const k = d.outlets[oi].dim[lv], x = g.get(k) || { ...avAcc(), key: k, name: k, n: 0 };
+        x.slots += a.slots; x.ok += a.ok; a.st.forEach((v, i) => (x.st[i] += v)); x.stock += a.stock; x.perDay += a.perDay; x.short += a.short; x.n++;
+        g.set(k, x);
+      });
+      table = mountTable(id, { title: `E-Commerce availability by ${lv === "zn" ? "zonal" : "RHO"}`, file: `availability_ecom_${lv}`, stamp, tools,
+        desc: (n) => `${int(n)} groups, lowest availability first. Group figures are sums of their YES items. Click a group to list its outlets.`,
+        rows: [...g.values()], key: (x) => x.key, searchText: (x) => x.name, defaultSort: "rate", defaultDir: "asc",
+        rowAttr: (x) => `data-gpick="${id}" data-glevel="${lv}" data-gkey="${esc(x.key)}" tabindex="0" title="List ${esc(avUnassigned(x.name))}'s E-Commerce outlets"`,
+        cols: avCols({ k: "name", label: lv === "zn" ? "Zonal" : "RHO", val: (x) => x.name, fmt: (x) => `<span class="cell-primary">${esc(avUnassigned(x.name))}</span>`, csv: (x) => avUnassigned(x.name) }, "Outlets") });
+    }
     return `${avBar("", true)}
       ${avTypeCriteria(["ecom"], { ecom: e })}
-      ${mountTable("av-e-o", { title: "E-Commerce availability by outlet", file: "availability_ecom_outlets", stamp, desc: (n) => `${int(n)} outlets, lowest availability first. Click an outlet for its missing items.`,
-        rows: oRows, key: (x) => x.code, searchText: (x) => `${x.code} ${x.name} ${x.sub}`, defaultSort: "rate", defaultDir: "asc", rowAttr: (x) => `data-avecom="${esc(x.code)}" tabindex="0"`, cols: avCols(avOutletFirst) })}
-`;
+      ${table}`;
   }
 
   // ---- drawers
