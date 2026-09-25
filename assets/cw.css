@@ -61,3 +61,27 @@ tr[data-cwoutlet],tr[data-cwcrit]{cursor:pointer}
 .av-crit tr[data-avgrp]:hover td,.av-crit td.av-click:hover{outline:1px solid var(--info);outline-offset:-1px}
 .av-crit td.av-click{cursor:pointer}
 .av-crit tr.av-gap td{border-top:14px solid var(--surface)}
+
+/* Availability: criteria cards (SKU wise page) */
+.av-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(175px,1fr));gap:12px}
+.av-card{border:1px solid var(--line);border-radius:var(--radius-sm);padding:12px 14px;display:flex;flex-direction:column;gap:6px;background:var(--surface);min-width:0}
+.av-card-head{all:unset;cursor:pointer;display:flex;flex-direction:column;gap:1px}
+.av-card-head:hover .av-card-name{color:var(--info)}
+.av-card-head:focus-visible{outline:2px solid var(--brand);outline-offset:2px;border-radius:4px}
+.av-card-name{font-size:13px;font-weight:700}
+.av-card-sub{font-size:11.5px;color:var(--ink-3)}
+.av-card-val{font-size:30px;font-weight:700;letter-spacing:-.03em;line-height:1.1;margin-top:4px}
+.av-card-note{font-size:11px;color:var(--ink-3);margin-top:-4px}
+.av-card-val.b1{color:var(--good)}.av-card-val.b2{color:var(--info)}.av-card-val.b3{color:var(--warn)}.av-card-val.b4,.av-card-val.b5{color:var(--bad)}
+.av-stack{display:flex;height:10px;border-radius:999px;overflow:hidden;gap:2px;background:var(--surface-3);margin:4px 0 2px}
+.av-stack i,.av-bands i{display:block}
+.b1{background:var(--good)}.b2{background:var(--info)}.b3{background:var(--warn)}.b4{background:color-mix(in srgb,var(--bad) 55%,var(--surface))}.b5{background:var(--bad)}
+.av-card-val.b1,.av-card-val.b2,.av-card-val.b3,.av-card-val.b4,.av-card-val.b5{background:none}
+.av-bands{list-style:none;margin:0;padding:0;display:grid;gap:1px}
+.av-bands li{display:grid;grid-template-columns:9px 1fr auto;gap:8px;align-items:center;font-size:12px;padding:3px 4px;border-radius:4px}
+.av-bands li[role=button]{cursor:pointer}
+.av-bands li[role=button]:hover{background:var(--surface-2)}
+.av-bands li i{width:9px;height:9px;border-radius:2px}
+.av-bands li span{color:var(--ink-2)}
+.av-bands li b{font-weight:650;font-variant-numeric:tabular-nums}
+.av-bands li.zero b,.av-bands li.zero span{color:var(--ink-3)}

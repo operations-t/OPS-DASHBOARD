@@ -2783,6 +2783,7 @@
   // RHO wise overall availability: per regional leader, the average of their outlets' own availability
   // for Core, Promo, KVI and all three together, and how many outlets fall in each band.
   const AV_BANDS = ["91%-100%", "81%-90%", "71%-80%", "61%-70%", "Below 60%"];
+  const AV_BAND_CLS = ["b1", "b2", "b3", "b4", "b5"];
   const avBandIdx = (r) => { const x = Math.round(r * 100); return x >= 91 ? 0 : x >= 81 ? 1 : x >= 71 ? 2 : x >= 61 ? 3 : 4; };
   const AV_KINDS = [["core", "Core"], ["promo", "Promo"], ["kvi", "KVI"], ["all", "Overall"]];
   // Outlets missing from Zone Distribution (the build labels them "Not in outlet master") read as Unassigned.
@@ -2934,6 +2935,22 @@
     const kvi = kviOnly ? ' data-avkvi="yes"' : "";
     const attr = (b, i) => (b.k === "ecom" ? `data-avecomband="${i == null ? -1 : i}"` : `data-avgrp="type" data-avkey="${b.k}" data-avtypekey="${b.k}"${i == null ? "" : ` data-avband="${i}"`}${kvi}`);
     NCSV.avtype = () => ["availability_criteria", ["Availability criteria", "Avg %", ...AV_BANDS], blocks.map((b) => [b.title, isNum(b.avg) ? (b.avg * 100).toFixed(2) : "", ...b.bands]), S.av.generatedAt.slice(0, 10)];
+    if (kinds.length > 1) {
+      // Several types: one card each, with a band bar, side by side.
+      const name = { core: "Core", promo: "Promo", kvi: "KVI", all: "Over all", ecom: "E-Commerce" };
+      const sub = (b) => (b.k === "ecom" ? `${int(scans.ecom.byS.size)} SKUs · ${int(scans.ecom.byO.size)} outlets` : `${int(scans[b.k].skus.length)} SKUs${b.k === "all" ? " (unique)" : ""} · ${int(scans[b.k].outs.length)} outlets`);
+      const cards = blocks.map((b) => {
+        const n = b.bands.reduce((x, y) => x + y, 0) || 1, cls = isNum(b.avg) ? AV_BAND_CLS[avBandIdx(b.avg)] : "";
+        return `<article class="av-card">
+          <button type="button" class="av-card-head" ${attr(b)} title="All ${esc(name[b.k])} outlets and items"><span class="av-card-name">${esc(name[b.k])}</span><span class="av-card-sub">${sub(b)}</span></button>
+          <div class="av-card-val ${cls}">${pc(b.avg)}</div><div class="av-card-note">average outlet availability</div>
+          <div class="av-stack" role="img" aria-label="${esc(AV_BANDS.map((t, i) => `${t}: ${b.bands[i]} outlets`).join(", "))}">${b.bands.map((c, i) => (c ? `<i class="${AV_BAND_CLS[i]}" style="flex-grow:${c}" title="${AV_BANDS[i]}: ${int(c)} outlets (${Math.round((c / n) * 100)}%)"></i>` : "")).join("")}</div>
+          <ul class="av-bands">${AV_BANDS.map((t, i) => `<li${b.bands[i] ? ` ${attr(b, i)} tabindex="0" role="button" title="${esc(name[b.k])} outlets at ${t}"` : ' class="zero"'}><i class="${AV_BAND_CLS[i]}"></i><span>${t}</span><b>${int(b.bands[i])}</b></li>`).join("")}</ul>
+        </article>`;
+      }).join("");
+      return `<section class="panel"><div class="panel-head"><div><h2>Availability criteria</h2><p>Average of outlet availability for each type, and how many outlets fall in each band. Click a card or a band for its outlets and items.</p></div><div class="panel-tools">${csvBtn("avtype")}</div></div>
+        <div class="panel-body"><div class="av-cards">${cards}</div></div></section>`;
+    }
     return `<section class="panel av-crit"><div class="panel-head"><div><h2>Availability criteria</h2><p>Average of outlet availability, then outlets in each band${kviOnly ? " (KVI outlets only)" : ""}. Click a row for its outlets and items.</p></div><div class="panel-tools">${csvBtn("avtype")}</div></div>
       <div class="table-wrap" style="max-height:none"><table><thead><tr><th>Availability criteria</th><th class="num">Outlet Qty</th></tr></thead><tbody>
       ${blocks.map((b) => `<tr class="av-div${b.k === "ecom" && kinds.length > 1 ? " av-gap" : ""}" ${attr(b)} tabindex="0"><td>${esc(b.title)}</td><td class="num${isNum(b.avg) && b.avg < 0.7 ? " av-low" : ""}">${pc(b.avg)}</td></tr>
