@@ -60,3 +60,4 @@ tr[data-cwoutlet],tr[data-cwcrit]{cursor:pointer}
 .av-crit tr[data-avgrp]{cursor:pointer}
 .av-crit tr[data-avgrp]:hover td,.av-crit td.av-click:hover{outline:1px solid var(--info);outline-offset:-1px}
 .av-crit td.av-click{cursor:pointer}
+.av-crit tr.av-gap td{border-top:14px solid var(--surface)}

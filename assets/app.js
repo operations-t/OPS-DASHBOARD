@@ -2878,10 +2878,10 @@
   }
 
   // Drawer for a division (optionally one outlet band of it) or a CAT3 + type: its items and its outlets.
-  function openAvGroup(level, key, band, type) {
+  function openAvGroup(level, key, band, type, kviOnly) {
     const d = S.av, days = avDays(), N = d.S;
-    const skus = avSkus(type || "all").filter((x) => (x[level] || "—") === key);
-    const outs = inView();
+    const skus = avSkus(type || "all").filter((x) => level === "type" || (x[level] || "—") === key);
+    const outs = avOutlets(kviOnly);
     const sAcc = new Map(skus.map((x) => [x.i, avAcc()])), oRows = [];
     for (const o of outs) {
       const a = avAcc(), base = o.i * N;
@@ -2901,7 +2901,7 @@
     const items = skus.map((x) => ({ x, a: sAcc.get(x.i) })).filter((r) => r.a.slots).sort((p, q) => avRate(p.a) - avRate(q.a));
     oRows.sort((p, q) => avRate(p.a) - avRate(q.a));
     S.lastFocus = document.activeElement;
-    const what = level === "nd" ? key : `${key} · ${type.toUpperCase()}`;
+    const what = level === "type" ? (type === "all" ? "Over all (Core, Promo and KVI)" : type.toUpperCase()) : level === "nd" ? key : `${key} · ${type.toUpperCase()}`;
     $("#drawerTitle").textContent = band != null ? `${what}: outlets at ${AV_BANDS[band]}` : what;
     const tr = (attr, name, sub, a) => `<tr ${attr} tabindex="0" style="cursor:pointer"><td><span class="cell-primary">${esc(name)}</span><span class="cell-secondary">${esc(sub)}</span></td><td class="num"><strong>${avPct(a)}</strong></td><td class="num">${int(a.ok)} / ${int(a.slots)}</td><td class="num">${int(a.st[2])}</td></tr>`;
     const head = (first) => `<thead><tr><th>${first}</th><th class="num">Availability</th><th class="num">Available</th><th class="num">Out of stock</th></tr></thead>`;
@@ -2912,6 +2912,45 @@
         ${items.map(({ x, a }) => tr(`data-avsku="${esc(x.c)}" data-avtype="${type || "all"}"`, x.n, `${x.c} · ${x.cat3 || "—"} · ${avTypeChips(x)}`, a)).join("")}</tbody></table></div></div>
       <div><div class="section-title">Outlets, lowest availability first</div><div class="table-wrap" style="max-height:420px"><table class="compact">${head("Outlet")}<tbody>
         ${oRows.map(({ o, a }) => tr(`data-avoutlet="${esc(o.c)}" data-avtype="${type || "all"}"`, `${o.c} · ${o.n}`, `${avUnassigned(o.dim.zn)} · ${avUnassigned(o.dim.rl)}`, a)).join("") || '<tr><td colspan="4" class="empty">No outlets.</td></tr>'}</tbody></table></div></div>`;
+    wireAv($("#drawerBody"));
+    showDrawer();
+  }
+
+  // Availability criteria by SKU type: SKU count, average outlet availability and outlets per band.
+  // kinds: any of core / promo / kvi / all (over all, unique SKUs) / ecom.
+  function avTypeCriteria(kinds, scans, kviOnly) {
+    const label = { core: "Core", promo: "Promo", kvi: "KVI", all: "Over All (Unique SKU)" };
+    const blocks = kinds.map((k) => {
+      if (k === "ecom") {
+        const e = scans.ecom, rates = [...e.byO.values()].map(avRate).filter(isNum), bands = [0, 0, 0, 0, 0];
+        rates.forEach((r) => bands[avBandIdx(r)]++);
+        return { k, title: `Ecom Availability (${int(e.byS.size)} SKU / ${int(e.byO.size)} Outlet)`, avg: rates.length ? rates.reduce((a, b) => a + b, 0) / rates.length : null, bands };
+      }
+      const sc = scans[k], rates = sc.outs.map((o) => avRate(sc.byO.get(o.i) || avAcc())).filter(isNum), bands = [0, 0, 0, 0, 0];
+      rates.forEach((r) => bands[avBandIdx(r)]++);
+      return { k, title: `${label[k]} (${int(sc.skus.length)} SKU)`, avg: rates.length ? rates.reduce((a, b) => a + b, 0) / rates.length : null, bands };
+    });
+    const pc = (v) => (isNum(v) ? `${Math.round(v * 100)}%` : "—");
+    const kvi = kviOnly ? ' data-avkvi="yes"' : "";
+    const attr = (b, i) => (b.k === "ecom" ? `data-avecomband="${i == null ? -1 : i}"` : `data-avgrp="type" data-avkey="${b.k}" data-avtypekey="${b.k}"${i == null ? "" : ` data-avband="${i}"`}${kvi}`);
+    NCSV.avtype = () => ["availability_criteria", ["Availability criteria", "Avg %", ...AV_BANDS], blocks.map((b) => [b.title, isNum(b.avg) ? (b.avg * 100).toFixed(2) : "", ...b.bands]), S.av.generatedAt.slice(0, 10)];
+    return `<section class="panel av-crit"><div class="panel-head"><div><h2>Availability criteria</h2><p>Average of outlet availability, then outlets in each band${kviOnly ? " (KVI outlets only)" : ""}. Click a row for its outlets and items.</p></div><div class="panel-tools">${csvBtn("avtype")}</div></div>
+      <div class="table-wrap" style="max-height:none"><table><thead><tr><th>Availability criteria</th><th class="num">Outlet Qty</th></tr></thead><tbody>
+      ${blocks.map((b) => `<tr class="av-div${b.k === "ecom" && kinds.length > 1 ? " av-gap" : ""}" ${attr(b)} tabindex="0"><td>${esc(b.title)}</td><td class="num${isNum(b.avg) && b.avg < 0.7 ? " av-low" : ""}">${pc(b.avg)}</td></tr>
+        ${AV_BANDS.map((t, i) => `<tr${b.bands[i] ? ` ${attr(b, i)} tabindex="0"` : ""}><td class="av-band">${t}</td><td class="num">${int(b.bands[i])}</td></tr>`).join("")}`).join("")}
+      </tbody></table></div></section>`;
+  }
+  function openAvEcomBand(band) {
+    const d = S.av, e = avEcomScan();
+    const rows = [...e.byO].map(([oi, a]) => ({ o: d.outlets[oi], a })).filter((r) => band < 0 || avBandIdx(avRate(r.a)) === band).sort((p, q) => avRate(p.a) - avRate(q.a));
+    const tot = avAcc();
+    rows.forEach(({ a }) => { tot.slots += a.slots; tot.ok += a.ok; a.st.forEach((v, i) => (tot.st[i] += v)); });
+    S.lastFocus = document.activeElement;
+    $("#drawerTitle").textContent = band < 0 ? "E-Commerce outlets" : `E-Commerce outlets at ${AV_BANDS[band]}`;
+    $("#drawerBody").innerHTML = `<div class="stat-grid three"><div class="stat"><small>Availability</small><strong>${avPct(tot)}</strong><div style="font-size:12px">${int(tot.ok)} of ${int(tot.slots)} YES items</div></div>
+        <div class="stat"><small>Outlets</small><strong>${int(rows.length)}</strong></div><div class="stat"><small>Out of stock</small><strong class="down">${int(tot.st[2])}</strong></div></div>
+      <div><div class="section-title">Outlets, lowest availability first</div><div class="table-wrap" style="max-height:520px"><table class="compact"><thead><tr><th>Outlet</th><th class="num">Availability</th><th class="num">Available</th><th class="num">Out of stock</th></tr></thead><tbody>
+        ${rows.map(({ o, a }) => `<tr data-avecom="${esc(o.c)}" tabindex="0" style="cursor:pointer"><td><span class="cell-primary">${esc(o.c)} · ${esc(o.n)}</span><span class="cell-secondary">${esc(avUnassigned(o.dim.zn))} · ${esc(avUnassigned(o.dim.rl))}</span></td><td class="num"><strong>${avPct(a)}</strong></td><td class="num">${int(a.ok)} / ${int(a.slots)}</td><td class="num">${int(a.st[2])}</td></tr>`).join("")}</tbody></table></div></div>`;
     wireAv($("#drawerBody"));
     showDrawer();
   }
@@ -2947,14 +2986,15 @@
         ${kpi({ label: "No sales in 60 days", value: int(t.st[3] + t.st[4]), sub: `${int(t.st[3])} in stock · ${int(t.st[4])} with no stock`, foot: "<span>In stock counts as available</span>", accent: "var(--info)" })}
         ${kpi({ label: "Shortfall", value: `${int(t.short)} <small>units</small>`, sub: `To reach ${avDays()} day${avDays() === 1 ? "" : "s"} of cover`, foot: `<span>${isNum(r) ? pct(r, 2) : "—"} available</span>`, accent: "var(--series-3)" })}
       </div></div>${avStrip(t)}</section>
-      ${avSkuTable(`av-${type}-s`, scan, `${name} SKUs`, type)}
+      ${avTypeCriteria([type], { [type]: scan }, kviOnly)}
       ${avGroupTable(`av-${type}-zn`, scan, "zn", type)}
       ${avOutletTable(`av-${type}-o`, scan, `${name} availability by outlet`, type)}`;
   }
   function pageAVK() {
     const g = avGuard(); if (g) return g;
     const type = S.avv.type, scan = avScan(type);
-    return `${avBar()}${avSkuTable("av-sku", scan, "SKU wise availability", type, 50, avSeg("type", AV_TYPES, "SKU type"))}`;
+    const scans = { core: avScan("core"), promo: avScan("promo"), kvi: avScan("kvi"), all: type === "all" ? scan : avScan("all"), ecom: avEcomScan() };
+    return `${avBar()}${avTypeCriteria(["core", "promo", "kvi", "all", "ecom"], scans)}${avSkuTable("av-sku", scan, "SKU wise availability", type, 50, avSeg("type", AV_TYPES, "SKU type"))}`;
   }
   function pageAVB() {
     const g = avGuard(); if (g) return g;
@@ -2967,7 +3007,6 @@
     const g = avGuard(); if (g) return g;
     const d = S.av, e = avEcomScan(), t = e.tot;
     const oRows = [...e.byO].map(([oi, a]) => { const o = d.outlets[oi]; return { ...a, code: o.c, name: o.n, sub: `${o.dim.zn} · ${o.dim.rl}` }; });
-    const sRows = [...e.byS].map(([si, a]) => { const s = d.ecom.skus[si]; return { ...a, code: s.c, name: s.n, sub: `${s.nd || "—"} · ${s.cat3 || "—"}`, n: a.slots }; });
     const stamp = d.generatedAt.slice(0, 10);
     return `${avBar("", true)}
       <section class="panel"><div class="panel-body"><div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
@@ -2976,10 +3015,10 @@
         ${kpi({ label: "Below DOS 2 Days", value: int(t.st[1]), sub: `${t.slots ? pct(t.st[1] / t.slots, 1) : "—"} of YES pairs`, accent: "var(--warn)" })}
         ${kpi({ label: "Assortment NO", value: int(d.ecom.assortmentNo), sub: "Pairs not counted", foot: `<span>${int(d.ecom.listedRows)} pairs in the file</span>`, accent: "var(--idle)" })}
       </div></div>${avStrip(t)}</section>
+      ${avTypeCriteria(["ecom"], { ecom: e })}
       ${mountTable("av-e-o", { title: "E-Commerce availability by outlet", file: "availability_ecom_outlets", stamp, desc: (n) => `${int(n)} outlets, lowest availability first. Click an outlet for its missing items.`,
         rows: oRows, key: (x) => x.code, searchText: (x) => `${x.code} ${x.name} ${x.sub}`, defaultSort: "rate", defaultDir: "asc", rowAttr: (x) => `data-avecom="${esc(x.code)}" tabindex="0"`, cols: avCols(avOutletFirst) })}
-      ${mountTable("av-e-s", { title: "E-Commerce availability by SKU", file: "availability_ecom_skus", stamp, desc: (n) => `${int(n)} SKUs, lowest availability first.`,
-        rows: sRows, key: (x) => x.code, searchText: (x) => `${x.code} ${x.name} ${x.sub}`, defaultSort: "rate", defaultDir: "asc", cols: avCols(avSkuFirst, "Outlets") })}`;
+`;
   }
 
   // ---- drawers
@@ -3073,7 +3112,8 @@
     on("[data-avoutlet]", (n) => openAvOutlet(n.dataset.avoutlet, n.dataset.avtype || "all"));
     on("[data-avsku]", (n) => openAvSku(n.dataset.avsku, n.dataset.avtype || "all"));
     on("[data-avecom]", (n) => openAvEcom(n.dataset.avecom));
-    on("[data-avgrp]", (n) => openAvGroup(n.dataset.avgrp, n.dataset.avkey, n.dataset.avband != null ? Number(n.dataset.avband) : null, n.dataset.avtypekey || "all"));
+    on("[data-avgrp]", (n) => openAvGroup(n.dataset.avgrp, n.dataset.avkey, n.dataset.avband != null ? Number(n.dataset.avband) : null, n.dataset.avtypekey || "all", n.dataset.avkvi === "yes"));
+    on("[data-avecomband]", (n) => openAvEcomBand(Number(n.dataset.avecomband)));
   }
 
   // ------------------------------------------------------------------ drawer
