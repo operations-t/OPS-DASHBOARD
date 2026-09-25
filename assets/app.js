@@ -232,23 +232,23 @@
   // ------------------------------------------------------------------ shell
   // Sidebar groups collapse and expand from their heading; the choice is remembered per browser.
   function renderNav() {
-    const shut = UI.navCollapsed || {};
+    const pick = UI.navOpen || {};
     $("#nav").innerHTML = NAV.map((g, gi) => {
       const items = g.items.map(([k, t, soon]) =>
         `<button data-page="${k}" ${S.page === k ? 'aria-current="page"' : ""}>${esc(t)}${soon ? '<span class="soon">Phase 2</span>' : ""}</button>`).join("");
       if (!g.group) return items;
-      const open = !shut[g.group];
+      const open = pick[g.group] ?? g.items.some(([k]) => k === S.page);
       return `<button class="nav-group" data-navgroup="${esc(g.group)}" aria-expanded="${open}" aria-controls="navg${gi}"><span>${esc(g.group)}</span><span class="nav-caret" aria-hidden="true">${open ? "▾" : "▸"}</span></button>
         <div class="nav-items" id="navg${gi}"${open ? "" : " hidden"}>${items}</div>`;
     }).join("");
     $$("#nav [data-page]").forEach((b) => b.addEventListener("click", () => { location.hash = b.dataset.page; closeRail(); }));
     $$("#nav [data-navgroup]").forEach((b) => b.addEventListener("click", () => {
-      UI.navCollapsed = { ...(UI.navCollapsed || {}), [b.dataset.navgroup]: b.getAttribute("aria-expanded") === "true" };
+      UI.navOpen = { ...(UI.navOpen || {}), [b.dataset.navgroup]: b.getAttribute("aria-expanded") !== "true" };
       saveUI(); renderNav();
     }));
   }
   // Sidebar and filter visibility, remembered per browser.
-  const UI = { railHidden: false, filtersHidden: false };
+  const UI = { railHidden: false, filtersHidden: false, cwBarOpen: false, avBarOpen: false, navOpen: {} };
   try { Object.assign(UI, JSON.parse(localStorage.getItem("opsdash-ui") || "{}")); } catch (e) {}
   const saveUI = () => { try { localStorage.setItem("opsdash-ui", JSON.stringify(UI)); } catch (e) {} };
   function toggleFilters() { UI.filtersHidden = !UI.filtersHidden; S.openDim = null; saveUI(); renderFilters(); }
@@ -556,6 +556,7 @@
       tr.onclick = go; tr.onkeydown = (e) => { if (e.key === "Enter") go(); };
     });
     $$("[data-gclear]", root).forEach((b) => (b.onclick = () => { delete S.gdrill[b.dataset.gclear]; render(); }));
+    $$("[data-uitoggle]", root).forEach((b) => (b.onclick = () => { UI[b.dataset.uitoggle] = !UI[b.dataset.uitoggle]; saveUI(); render(); }));
     wireNet(root);
     wireCw(root);
     wireAv(root);
@@ -2255,6 +2256,11 @@
   function cwBar(v) {
     const d = S.cw, f = S.cwv;
     const quick = [["", "Quick period"], ["all", "Full loaded period"], ["7", "Last 7 days"], ["14", "Last 14 days"], ["mtd", "Month to date"]];
+    if (!UI.cwBarOpen) {
+      const status = CW_STATUS.find((x) => x[0] === f.status)[1];
+      return `<section class="panel ui-slim"><div class="panel-head"><div><h2>Period and scope</h2><p>${v.bad ? "The From date is after the To date." : `${fdate(f.from)} to ${fdate(f.to)} · ${dayCount(f.from, f.to)} days · ${esc(status)}${f.compare && v.prior ? " · compared with the prior period" : ""}`}</p></div>
+        <div class="panel-tools"><button class="btn" data-uitoggle="cwBarOpen" aria-expanded="false">Show</button></div></div></section>`;
+    }
     return `<section class="panel"><div class="panel-head"><div><h2>Period and scope</h2><p>${v.bad ? "The From date is after the To date." : `${fdate(f.from)} to ${fdate(f.to)}, ${dayCount(f.from, f.to)} days. Data loaded ${fdate(d.dateRange.min)} to ${fdate(d.dateRange.max)}.`}</p></div>
       <div class="panel-tools">
         <label class="net-date">From<input type="date" data-cwdate="from" value="${f.from}" min="${d.dateRange.min}" max="${d.dateRange.max}"></label>
@@ -2262,6 +2268,7 @@
         <select class="sel" data-cwquick aria-label="Quick period">${quick.map(([k, t]) => `<option value="${k}">${t}</option>`).join("")}</select>
         ${cwSel("status", CW_STATUS, "Performance status")}
         <button class="btn" data-cwcompare aria-pressed="${!!(f.compare && v.prior)}" ${v.priorPeriod ? "" : "disabled"} title="${v.priorPeriod ? `Compare with ${fdate(v.priorPeriod.from)} to ${fdate(v.priorPeriod.to)}` : "No equal-length period before this one in the loaded data"}">Compare with prior period</button>
+        <button class="btn" data-uitoggle="cwBarOpen" aria-expanded="true">Hide</button>
       </div></div>
       <div class="panel-body cw-raw"><span class="muted">Raw rows for the outlets and dates in view:</span>
         <button class="btn" data-cwraw="daily">Outlet-day rows (CSV)</button>
@@ -2717,10 +2724,15 @@
     const nds = [...new Set(pool.map((s) => s.nd).filter(Boolean))].sort();
     const cats = [...new Set(pool.filter((s) => !f.nd || s.nd === f.nd).map((s) => s.cat3).filter(Boolean))].sort();
     const stale = d.stale.length ? `<p class="note" style="margin:0">${d.stale.map((x) => `${x.kind === "stock" ? "Stock" : "Sales (DOS)"} file is from ${fdate(x.modified.slice(0, 10))}`).join("; ")}, more than 2 days old. Upload today's file to the Availability folder.</p>` : "";
+    if (!UI.avBarOpen) {
+      const parts = [ecom ? "Stock against DOS 2 Days" : `${avDays()} day${avDays() === 1 ? "" : "s"} of cover`, f.nd || "All product divisions", f.cat3 || "All CAT3"];
+      return `<section class="panel ui-slim"><div class="panel-head"><div><h2>Scope</h2><p>${esc(parts.join(" · "))}</p></div>
+        <div class="panel-tools">${extra}<button class="btn" data-uitoggle="avBarOpen" aria-expanded="false">Show</button></div></div>${stale ? `<div class="panel-body">${stale}</div>` : ""}</section>`;
+    }
     return `<section class="panel"><div class="panel-head"><div><h2>Scope</h2><p>${ecom ? "E-Commerce: available when stock covers DOS 2 Days; only Assortment = YES pairs count." : `Available when stock covers the chosen days of sales (60-day sales ÷ 60 × days). Items with no sales in 60 days count as available when in stock.`} ${int(d.excluded.length)} outlets with no Core, KVI or Promo stock or sales are left out everywhere.</p></div>
       <div class="panel-tools">${ecom ? "" : `<label class="net-date">Required cover${avSel("days", AV_DAYS, "Required cover")}</label>`}
         ${avSel("nd", [["", "All product divisions"], ...nds.map((x) => [x, x])], "Product division")}
-        ${avSel("cat3", [["", "All CAT3"], ...cats.map((x) => [x, x])], "CAT3")}${extra}</div></div>${stale ? `<div class="panel-body">${stale}</div>` : ""}</section>`;
+        ${avSel("cat3", [["", "All CAT3"], ...cats.map((x) => [x, x])], "CAT3")}${extra}<button class="btn" data-uitoggle="avBarOpen" aria-expanded="true">Hide</button></div></div>${stale ? `<div class="panel-body">${stale}</div>` : ""}</section>`;
   }
   const avPct = (a) => (a && a.slots ? pct(avRate(a), 2) : "—");
   const avBand = (r) => (!isNum(r) ? { cls: "idle", label: "No items" } : r >= 0.95 ? { cls: "good", label: "95% or more" } : r >= 0.85 ? { cls: "warn", label: "85 to 95%" } : { cls: "bad", label: "Below 85%" });
@@ -3213,7 +3225,7 @@
     const h = location.hash.slice(1);
     S.page = TITLES[h] ? h : "overview";
     const grp = NAV.find((g) => g.items.some(([k]) => k === S.page))?.group;
-    if (grp && UI.navCollapsed?.[grp]) { UI.navCollapsed = { ...UI.navCollapsed, [grp]: false }; saveUI(); }
+    if (grp && UI.navOpen?.[grp] === false) { UI.navOpen = { ...UI.navOpen }; delete UI.navOpen[grp]; saveUI(); }
     render();
     window.scrollTo(0, 0);
   }

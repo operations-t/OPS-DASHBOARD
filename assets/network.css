@@ -176,3 +176,5 @@ tr[data-gpick][aria-selected="true"] td{background:var(--info-soft)}
 .nav button.nav-group:hover{background:var(--surface-2);color:var(--info)}
 .nav-caret{font-size:12px;color:var(--ink-3)}
 .nav-items{display:flex;flex-direction:column;gap:1px}
+.panel.ui-slim .panel-head{padding-top:9px;padding-bottom:9px;border-bottom:0}
+.panel.ui-slim .panel-head h2{font-size:13.5px}
