@@ -230,10 +230,22 @@
   }
 
   // ------------------------------------------------------------------ shell
+  // Sidebar groups collapse and expand from their heading; the choice is remembered per browser.
   function renderNav() {
-    $("#nav").innerHTML = NAV.map((g) => (g.group ? `<div class="nav-group">${esc(g.group)}</div>` : "") + g.items.map(([k, t, soon]) =>
-      `<button data-page="${k}" ${S.page === k ? 'aria-current="page"' : ""}>${esc(t)}${soon ? '<span class="soon">Phase 2</span>' : ""}</button>`).join("")).join("");
+    const shut = UI.navCollapsed || {};
+    $("#nav").innerHTML = NAV.map((g, gi) => {
+      const items = g.items.map(([k, t, soon]) =>
+        `<button data-page="${k}" ${S.page === k ? 'aria-current="page"' : ""}>${esc(t)}${soon ? '<span class="soon">Phase 2</span>' : ""}</button>`).join("");
+      if (!g.group) return items;
+      const open = !shut[g.group];
+      return `<button class="nav-group" data-navgroup="${esc(g.group)}" aria-expanded="${open}" aria-controls="navg${gi}"><span>${esc(g.group)}</span><span class="nav-caret" aria-hidden="true">${open ? "▾" : "▸"}</span></button>
+        <div class="nav-items" id="navg${gi}"${open ? "" : " hidden"}>${items}</div>`;
+    }).join("");
     $$("#nav [data-page]").forEach((b) => b.addEventListener("click", () => { location.hash = b.dataset.page; closeRail(); }));
+    $$("#nav [data-navgroup]").forEach((b) => b.addEventListener("click", () => {
+      UI.navCollapsed = { ...(UI.navCollapsed || {}), [b.dataset.navgroup]: b.getAttribute("aria-expanded") === "true" };
+      saveUI(); renderNav();
+    }));
   }
   // Sidebar and filter visibility, remembered per browser.
   const UI = { railHidden: false, filtersHidden: false };
@@ -3200,6 +3212,8 @@
   function route() {
     const h = location.hash.slice(1);
     S.page = TITLES[h] ? h : "overview";
+    const grp = NAV.find((g) => g.items.some(([k]) => k === S.page))?.group;
+    if (grp && UI.navCollapsed?.[grp]) { UI.navCollapsed = { ...UI.navCollapsed, [grp]: false }; saveUI(); }
     render();
     window.scrollTo(0, 0);
   }

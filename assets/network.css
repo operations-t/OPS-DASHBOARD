@@ -170,3 +170,9 @@ tr[data-lpick]{cursor:pointer}
 tr[data-lpick][aria-selected="true"] td{background:var(--info-soft)}
 tr[data-gpick]{cursor:pointer}
 tr[data-gpick][aria-selected="true"] td{background:var(--info-soft)}
+
+/* collapsible sidebar groups */
+.nav button.nav-group{display:flex;justify-content:space-between;align-items:center;width:100%;margin-top:6px;padding:10px 10px 5px;font-size:14.4px;font-weight:750;color:var(--info);border-radius:var(--radius-sm)}
+.nav button.nav-group:hover{background:var(--surface-2);color:var(--info)}
+.nav-caret{font-size:12px;color:var(--ink-3)}
+.nav-items{display:flex;flex-direction:column;gap:1px}
