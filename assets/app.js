@@ -2866,15 +2866,54 @@
     NCSV.avdiv = () => ["availability_by_new_division", ["New Division", "SKUs", "Avg %", ...AV_BANDS], divRows.map((x) => [x.nd, x.skus, isNum(x.avg) ? (x.avg * 100).toFixed(2) : "", ...x.bands]), stamp];
     NCSV.avcat = () => ["availability_by_cat3", ["CAT3", "Core %", "KVI %", "Promo %"], catRows.map((x) => [x.c, ...["core", "kvi", "promo"].map((t) => (isNum(x[t]) ? (x[t] * 100).toFixed(2) : ""))]), stamp];
     return `<div class="grid-h av-crit">
-      <section class="panel"><div class="panel-head"><div><h2>Availability criteria (New Division)</h2><p>Average of outlet availability, then outlets in each band.</p></div><div class="panel-tools">${csvBtn("avdiv")}</div></div>
+      <section class="panel"><div class="panel-head"><div><h2>Availability criteria (New Division)</h2><p>Average of outlet availability, then outlets in each band. Click a division or a band for its items and outlets.</p></div><div class="panel-tools">${csvBtn("avdiv")}</div></div>
         <div class="table-wrap"><table><thead><tr><th>Availability criteria (New Division)</th><th class="num">Outlet Qty</th></tr></thead><tbody>
-        ${divRows.map((x) => `<tr class="av-div"><td>${esc(x.nd)} (${int(x.skus)} SKU)</td><td class="num${red(x.avg)}">${pc(x.avg)}</td></tr>
-          ${AV_BANDS.map((b, i) => `<tr><td class="av-band">${b}</td><td class="num">${int(x.bands[i])}</td></tr>`).join("")}`).join("")}
+        ${divRows.map((x) => `<tr class="av-div" data-avgrp="nd" data-avkey="${esc(x.nd)}" tabindex="0" title="Items and outlets in ${esc(x.nd)}"><td>${esc(x.nd)} (${int(x.skus)} SKU)</td><td class="num${red(x.avg)}">${pc(x.avg)}</td></tr>
+          ${AV_BANDS.map((b, i) => `<tr${x.bands[i] ? ` data-avgrp="nd" data-avkey="${esc(x.nd)}" data-avband="${i}" tabindex="0" title="${esc(x.nd)}: outlets at ${b}"` : ""}><td class="av-band">${b}</td><td class="num">${int(x.bands[i])}</td></tr>`).join("")}`).join("")}
         </tbody></table></div></section>
-      <section class="panel"><div class="panel-head"><div><h2>Availability criteria (CAT3)</h2><p>Weakest first. Red is below 70%; blank means no SKU of that type in the CAT3.</p></div><div class="panel-tools">${csvBtn("avcat")}</div></div>
+      <section class="panel"><div class="panel-head"><div><h2>Availability criteria (CAT3)</h2><p>Weakest first. Red is below 70%; blank means no SKU of that type in the CAT3. Click a figure for its items and outlets.</p></div><div class="panel-tools">${csvBtn("avcat")}</div></div>
         <div class="table-wrap"><table><thead><tr><th>Availability criteria (CAT3)</th><th class="num">Core %</th><th class="num">KVI %</th><th class="num">Promo %</th></tr></thead><tbody>
-        ${catRows.map((x) => `<tr><td>${esc(x.c)}</td>${["core", "kvi", "promo"].map((t) => `<td class="num${red(x[t])}">${pc(x[t])}</td>`).join("")}</tr>`).join("")}
+        ${catRows.map((x) => `<tr><td>${esc(x.c)}</td>${["core", "kvi", "promo"].map((t) => (isNum(x[t]) ? `<td class="num av-click${red(x[t])}" data-avgrp="cat3" data-avkey="${esc(x.c)}" data-avtypekey="${t}" tabindex="0" title="${esc(x.c)} ${t.toUpperCase()}: items and outlets">${pc(x[t])}</td>` : "<td></td>")).join("")}</tr>`).join("")}
         </tbody></table></div></section></div>`;
+  }
+
+  // Drawer for a division (optionally one outlet band of it) or a CAT3 + type: its items and its outlets.
+  function openAvGroup(level, key, band, type) {
+    const d = S.av, days = avDays(), N = d.S;
+    const skus = avSkus(type || "all").filter((x) => (x[level] || "—") === key);
+    const outs = inView();
+    const sAcc = new Map(skus.map((x) => [x.i, avAcc()])), oRows = [];
+    for (const o of outs) {
+      const a = avAcc(), base = o.i * N;
+      for (const x of skus) {
+        const st = d.stock[base + x.i], sl = d.sales60[base + x.i], k = avStatus(st, sl, days);
+        avAdd(a, st, sl, days, k); avAdd(sAcc.get(x.i), st, sl, days, k);
+      }
+      if (a.slots && (band == null || avBandIdx(avRate(a)) === band)) oRows.push({ o, a });
+    }
+    // Item figures follow the outlets listed, so a band's drawer shows items at those outlets only.
+    if (band != null) {
+      sAcc.forEach((v, k) => sAcc.set(k, avAcc()));
+      for (const { o } of oRows) for (const x of skus) { const st = d.stock[o.i * N + x.i], sl = d.sales60[o.i * N + x.i]; avAdd(sAcc.get(x.i), st, sl, days, avStatus(st, sl, days)); }
+    }
+    const tot = avAcc();
+    oRows.forEach(({ a }) => { tot.slots += a.slots; tot.ok += a.ok; a.st.forEach((v, i) => (tot.st[i] += v)); });
+    const items = skus.map((x) => ({ x, a: sAcc.get(x.i) })).filter((r) => r.a.slots).sort((p, q) => avRate(p.a) - avRate(q.a));
+    oRows.sort((p, q) => avRate(p.a) - avRate(q.a));
+    S.lastFocus = document.activeElement;
+    const what = level === "nd" ? key : `${key} · ${type.toUpperCase()}`;
+    $("#drawerTitle").textContent = band != null ? `${what}: outlets at ${AV_BANDS[band]}` : what;
+    const tr = (attr, name, sub, a) => `<tr ${attr} tabindex="0" style="cursor:pointer"><td><span class="cell-primary">${esc(name)}</span><span class="cell-secondary">${esc(sub)}</span></td><td class="num"><strong>${avPct(a)}</strong></td><td class="num">${int(a.ok)} / ${int(a.slots)}</td><td class="num">${int(a.st[2])}</td></tr>`;
+    const head = (first) => `<thead><tr><th>${first}</th><th class="num">Availability</th><th class="num">Available</th><th class="num">Out of stock</th></tr></thead>`;
+    $("#drawerBody").innerHTML = `<div class="stat-grid three"><div class="stat"><small>Availability</small><strong>${avPct(tot)}</strong><div style="font-size:12px">${int(tot.ok)} of ${int(tot.slots)} pairs</div></div>
+        <div class="stat"><small>Items</small><strong>${int(items.length)}</strong><div style="font-size:12px">${type && type !== "all" ? type.toUpperCase() : "Core, Promo and KVI"}</div></div>
+        <div class="stat"><small>Outlets</small><strong>${int(oRows.length)}</strong><div style="font-size:12px">${band != null ? AV_BANDS[band] : "in view"}</div></div></div>
+      <div><div class="section-title">Items, lowest availability first${band != null ? " (at these outlets)" : ""}</div><div class="table-wrap" style="max-height:340px"><table class="compact">${head("Item")}<tbody>
+        ${items.map(({ x, a }) => tr(`data-avsku="${esc(x.c)}" data-avtype="${type || "all"}"`, x.n, `${x.c} · ${x.cat3 || "—"} · ${avTypeChips(x)}`, a)).join("")}</tbody></table></div></div>
+      <div><div class="section-title">Outlets, lowest availability first</div><div class="table-wrap" style="max-height:420px"><table class="compact">${head("Outlet")}<tbody>
+        ${oRows.map(({ o, a }) => tr(`data-avoutlet="${esc(o.c)}" data-avtype="${type || "all"}"`, `${o.c} · ${o.n}`, `${avUnassigned(o.dim.zn)} · ${avUnassigned(o.dim.rl)}`, a)).join("") || '<tr><td colspan="4" class="empty">No outlets.</td></tr>'}</tbody></table></div></div>`;
+    wireAv($("#drawerBody"));
+    showDrawer();
   }
 
   // ---- pages
@@ -3034,6 +3073,7 @@
     on("[data-avoutlet]", (n) => openAvOutlet(n.dataset.avoutlet, n.dataset.avtype || "all"));
     on("[data-avsku]", (n) => openAvSku(n.dataset.avsku, n.dataset.avtype || "all"));
     on("[data-avecom]", (n) => openAvEcom(n.dataset.avecom));
+    on("[data-avgrp]", (n) => openAvGroup(n.dataset.avgrp, n.dataset.avkey, n.dataset.avband != null ? Number(n.dataset.avband) : null, n.dataset.avtypekey || "all"));
   }
 
   // ------------------------------------------------------------------ drawer

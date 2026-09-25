@@ -57,3 +57,6 @@ tr[data-cwoutlet],tr[data-cwcrit]{cursor:pointer}
 .av-crit tr.av-div td{font-weight:700;background:var(--surface-2);border-top:1px solid var(--line)}
 .av-crit td.av-band{padding-left:28px;color:var(--ink-2)}
 .av-crit td.av-low{background:var(--bad-soft);color:var(--bad);font-weight:700}
+.av-crit tr[data-avgrp]{cursor:pointer}
+.av-crit tr[data-avgrp]:hover td,.av-crit td.av-click:hover{outline:1px solid var(--info);outline-offset:-1px}
+.av-crit td.av-click{cursor:pointer}
