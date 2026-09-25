@@ -35,11 +35,14 @@ jobs:
       - name: Download consumable and wastage files and build cw.json
         continue-on-error: true
         run: python scripts/cw/refresh.py
+      - name: Download availability files and build av.json
+        continue-on-error: true
+        run: python scripts/av/refresh.py
       - name: Publish if the data changed
         run: |
-          if git diff --quiet -- data/data.json data/network.json data/cw.json; then echo "No data changes."; exit 0; fi
+          if git diff --quiet -- data/data.json data/network.json data/cw.json data/av.json; then echo "No data changes."; exit 0; fi
           git config user.name "ops-dashboard-bot"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/data.json data/network.json data/network-sync.json data/cw.json
+          git add data/data.json data/network.json data/network-sync.json data/cw.json data/av.json
           git commit -m "Refresh data $(date -u +'%Y-%m-%d %H:%M') UTC"
           git push

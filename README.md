@@ -22,6 +22,12 @@ All data now lives under one mother folder, [Operations data](https://drive.goog
 
 One till-date sales file (columns **Outlet, Date, Article Division, POS NSI**) feeds both the Outlet network pages and Consumable & wastage; keep it current. If two files of the same kind exist, the one whose data runs latest wins (for Zone Distribution, the most recently modified).
 
+### Availability
+
+The Availability pages read `data/av.json`, built by `scripts/av/refresh.py` from the mother folder. Files are recognised by their columns: the SKU lists (sheets with Article Code, Name, CAT3 and a CORE / PROMO / KVI / ECOM flag), the stock matrix (ProductCode, ProductName, one column per outlet; CSV or Excel), 60-day sales (Outlet Code, Article Code, Sales Qty, PER DAY), the E-Commerce file (Code, code, Monthly Average Sales (ECOM), DOS 2 Days, Assortment for outlet), the KVI outlet list (one CODE column) and Zone Distribution. Stock and sales should be uploaded daily; the pages warn when either is more than 2 days old.
+
+Rules: an outlet with no Core, KVI or Promo stock, or no Core, KVI or Promo sales, is left out everywhere. A pair is available when stock covers the chosen days of sales (60-day sales ÷ 60 × days, default 2); a pair with no sales in 60 days counts and is available when it has stock. E-Commerce counts only Assortment = YES pairs and is available when stock covers DOS 2 Days. The KVI outlet list is only a filter on the KVI page.
+
 ### Outlet network and Growth & momentum
 
 These two pages are built into this dashboard and read `data/network.json`, which the same hourly refresh builds from the mother folder. It needs these workbooks, anywhere under it:
@@ -65,7 +71,8 @@ Coolify: press **Restart** on the application; the refresh runs at start-up.
 - `index.html`, `assets/` — the site
 - `scripts/build_data.py` — downloads and reads the Drive files (run `python scripts/build_data.py --local <folder>` to test with local copies in `tilldate/`, `monthend/`, `performance/` subfolders)
 - `scripts/network/refresh.py` — downloads the outlet network folder and builds `data/network.json` (standard library only)
+- `scripts/av/refresh.py` — builds `data/av.json` for the Availability pages
 - `scripts/cw/refresh.py` — downloads the Consumable & Wastage Control folder (Target.txt, Sales-Till, Zone Distribution, CONSUMABLE, WASTAGE) and builds `data/cw.json`
 - `.github/workflows/refresh-data.yml` — the hourly refresh
-- `data/data.json`, `data/network.json`, `data/network-sync.json`, `data/cw.json` — generated data (don't edit by hand)
+- `data/data.json`, `data/network.json`, `data/network-sync.json`, `data/cw.json`, `data/av.json` — generated data (don't edit by hand)
 - `Dockerfile`, `deploy/` — Coolify / Docker packaging (nginx + hourly refresh + optional login)

@@ -9,6 +9,7 @@ on:
       - data/data.json
       - data/network.json
       - data/cw.json
+      - data/av.json
       - .nojekyll
       - .github/workflows/deploy-pages.yml
   workflow_dispatch:

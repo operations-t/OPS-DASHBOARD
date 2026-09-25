@@ -9,7 +9,8 @@ ENV TZ=Asia/Dhaka \
     REFRESH_MINUTES=60 \
     DATA_OUT=/usr/share/nginx/html/data/data.json \
     NETWORK_OUT=/usr/share/nginx/html/data/network.json \
-    CW_OUT=/usr/share/nginx/html/data/cw.json
+    CW_OUT=/usr/share/nginx/html/data/cw.json \
+    AV_OUT=/usr/share/nginx/html/data/av.json
 
 COPY index.html /usr/share/nginx/html/
 COPY assets /usr/share/nginx/html/assets
