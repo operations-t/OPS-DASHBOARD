@@ -2789,9 +2789,14 @@
   function avCriteriaCard(c, wide) {
     const pc = (v) => (isNum(v) ? `${Math.round(v * 100)}%` : "—");
     const n = c.bands.reduce((x, y) => x + y, 0) || 1, cls = isNum(c.avg) ? AV_BAND_CLS[avBandIdx(c.avg)] : "";
+    const pr = c.pairs ? avRate(c.pairs) : null, pcls = isNum(pr) ? AV_BAND_CLS[avBandIdx(pr)] : "";
+    const figure = c.pairs
+      ? `<div class="av-card-val ${pcls}">${avPct(c.pairs)}</div><div class="av-card-note">available · ${int(c.pairs.ok)} of ${int(c.pairs.slots)} ${c.pairsLabel || "outlet × SKU pairs"}</div>
+         <div class="av-card-avg"><span>Average outlet availability</span><b class="${cls}">${pc(c.avg)}</b></div>`
+      : `<div class="av-card-val ${cls}">${pc(c.avg)}</div><div class="av-card-note">average outlet availability</div>`;
     return `<article class="av-card${wide ? " wide" : ""}">
       <div class="av-card-main"><button type="button" class="av-card-head" ${c.head} title="All ${esc(c.name)} outlets and items"><span class="av-card-name">${esc(c.name)}</span><span class="av-card-sub">${c.sub}</span></button>
-        <div class="av-card-val ${cls}">${pc(c.avg)}</div><div class="av-card-note">average outlet availability</div></div>
+        ${figure}</div>
       <div class="av-card-dist"><div class="av-stack" role="img" aria-label="${esc(AV_BANDS.map((t, i) => `${t}: ${c.bands[i]} outlets`).join(", "))}">${c.bands.map((v, i) => (v ? `<i class="${AV_BAND_CLS[i]}" style="flex-grow:${v}" title="${AV_BANDS[i]}: ${int(v)} outlets (${Math.round((v / n) * 100)}%)"></i>` : "")).join("")}</div>
         <ul class="av-bands">${AV_BANDS.map((t, i) => `<li${c.bands[i] ? ` ${c.band(i)} tabindex="0" role="button" title="${esc(c.name)} outlets at ${t}"` : ' class="zero"'}><i class="${AV_BAND_CLS[i]}"></i><span>${t}</span><b>${int(c.bands[i])}</b>${wide ? `<small>${Math.round((c.bands[i] / n) * 100)}%</small>` : ""}</li>`).join("")}</ul></div>
     </article>`;
@@ -2946,8 +2951,11 @@
     NCSV.avtype = () => ["availability_criteria", ["Availability criteria", "Avg %", ...AV_BANDS], blocks.map((b) => [b.title, isNum(b.avg) ? (b.avg * 100).toFixed(2) : "", ...b.bands]), S.av.generatedAt.slice(0, 10)];
     const name = { core: "Core", promo: "Promo", kvi: "KVI", all: "Over all", ecom: "E-Commerce" };
     const sub = (b) => (b.k === "ecom" ? `${int(scans.ecom.byS.size)} SKUs · ${int(scans.ecom.byO.size)} outlets` : `${int(scans[b.k].skus.length)} SKUs${b.k === "all" ? " (unique)" : ""} · ${int(scans[b.k].outs.length)} outlets${kviOnly ? " (KVI outlets)" : ""}`);
-    const cards = blocks.map((b) => avCriteriaCard({ name: name[b.k], sub: sub(b), avg: b.avg, bands: b.bands, head: attr(b), band: (i) => attr(b, i) }, kinds.length === 1)).join("");
-    return `<section class="panel"><div class="panel-head"><div><h2>Availability criteria</h2><p>Average of outlet availability${kinds.length > 1 ? " for each type" : ""}, and how many outlets fall in each band. Click ${kinds.length > 1 ? "a card" : "the title"} or a band for its outlets and items.</p></div><div class="panel-tools">${csvBtn("avtype")}</div></div>
+    const single = kinds.length === 1;
+    const pairs = (b) => (!single ? null : b.k === "ecom" ? scans.ecom.tot : scans[b.k].tot);
+    const cards = blocks.map((b) => avCriteriaCard({ name: single ? `${name[b.k]} availability` : name[b.k], sub: sub(b) + (single && b.k === "ecom" ? ` · YES assortment only, ${int(S.av.ecom.assortmentNo)} NO pairs not counted` : ""),
+      avg: b.avg, bands: b.bands, head: attr(b), band: (i) => attr(b, i), pairs: pairs(b), pairsLabel: b.k === "ecom" ? "YES items" : null }, single)).join("");
+    return `<section class="panel"><div class="panel-head"><div><h2>${single ? "Availability" : "Availability criteria"}</h2><p>${single ? "Share of items available, the average of outlet availability, and how many outlets fall in each band." : "Average of outlet availability for each type, and how many outlets fall in each band."} Click ${single ? "the title" : "a card"} or a band for its outlets and items.</p></div><div class="panel-tools">${csvBtn("avtype")}</div></div>
       <div class="panel-body"><div class="av-cards${kinds.length === 1 ? " single" : ""}">${cards}</div></div></section>`;
   }
   function openAvEcomBand(band) {
@@ -2988,11 +2996,7 @@
     const kviOnly = type === "kvi" && S.avv.kviOnly === "yes";
     const scan = avScan(type, kviOnly), name = AV_TYPES.find((t) => t[0] === type)[1];
     const extra = type === "kvi" ? avSeg("kviOnly", [["no", "All outlets"], ["yes", "KVI outlets only"]], "Outlets") : "";
-    const t = scan.tot;
     return `${avBar(extra)}
-      <section class="panel"><div class="panel-body"><div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
-        ${avCard(`${name} availability`, t, "var(--series-2)", `<span>${int(scan.outs.length)} outlets${kviOnly ? " (KVI outlets)" : ""} · ${int(scan.skus.length)} SKUs</span>`)}
-      </div></div></section>
       ${avTypeCriteria([type], { [type]: scan }, kviOnly)}
       ${avGroupTable(`av-${type}-zn`, scan, "zn", type)}
       ${avOutletTable(`av-${type}-o`, scan, `${name} availability by outlet`, type)}`;
@@ -3015,12 +3019,6 @@
     const oRows = [...e.byO].map(([oi, a]) => { const o = d.outlets[oi]; return { ...a, code: o.c, name: o.n, sub: `${o.dim.zn} · ${o.dim.rl}` }; });
     const stamp = d.generatedAt.slice(0, 10);
     return `${avBar("", true)}
-      <section class="panel"><div class="panel-body"><div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
-        ${avCard("E-Commerce availability", t, "var(--series-4)", `<span>${int(e.byO.size)} outlets · ${int(e.byS.size)} SKUs</span>`)}
-        ${kpi({ label: "Out of stock", value: int(t.st[2]), sub: `${t.slots ? pct(t.st[2] / t.slots, 1) : "—"} of YES pairs`, accent: "var(--bad)" })}
-        ${kpi({ label: "Below DOS 2 Days", value: int(t.st[1]), sub: `${t.slots ? pct(t.st[1] / t.slots, 1) : "—"} of YES pairs`, accent: "var(--warn)" })}
-        ${kpi({ label: "Assortment NO", value: int(d.ecom.assortmentNo), sub: "Pairs not counted", foot: `<span>${int(d.ecom.listedRows)} pairs in the file</span>`, accent: "var(--idle)" })}
-      </div></div>${avStrip(t)}</section>
       ${avTypeCriteria(["ecom"], { ecom: e })}
       ${mountTable("av-e-o", { title: "E-Commerce availability by outlet", file: "availability_ecom_outlets", stamp, desc: (n) => `${int(n)} outlets, lowest availability first. Click an outlet for its missing items.`,
         rows: oRows, key: (x) => x.code, searchText: (x) => `${x.code} ${x.name} ${x.sub}`, defaultSort: "rate", defaultDir: "asc", rowAttr: (x) => `data-avecom="${esc(x.code)}" tabindex="0"`, cols: avCols(avOutletFirst) })}

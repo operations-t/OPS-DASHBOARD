@@ -99,3 +99,7 @@ tr[data-cwoutlet],tr[data-cwcrit]{cursor:pointer}
 .av-cards.div{grid-template-columns:repeat(auto-fill,minmax(190px,1fr))}
 .av-cards.div .av-card-val{font-size:24px}
 @media (max-width:760px){.av-card.wide{grid-template-columns:1fr}.av-card.wide .av-bands{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.av-card-avg{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-top:6px;padding-top:8px;border-top:1px solid var(--line-soft);font-size:12px;color:var(--ink-2)}
+.av-card-avg b{font-size:16px;font-weight:700}
+.av-card-avg b.b1{color:var(--good)}.av-card-avg b.b2{color:var(--info)}.av-card-avg b.b3{color:var(--warn)}.av-card-avg b.b4,.av-card-avg b.b5{color:var(--bad)}
+.av-card-avg b.b1,.av-card-avg b.b2,.av-card-avg b.b3,.av-card-avg b.b4,.av-card-avg b.b5{background:none}
