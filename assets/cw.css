@@ -33,3 +33,20 @@
 .meter.cw-empty{background:repeating-linear-gradient(135deg,var(--idle-soft) 0 5px,transparent 5px 10px)}
 tr[data-cwoutlet],tr[data-cwcrit]{cursor:pointer}
 @media (max-width:640px){.cw-donut{grid-template-columns:1fr;justify-items:center}}
+
+/* Availability: RHO wise matrix */
+.av-rho table{font-size:12px}
+.av-rho th,.av-rho td{padding:6px 8px;text-align:center}
+.av-rho th:first-child,.av-rho td:first-child{text-align:left}
+.av-rho thead th{white-space:nowrap}
+.av-rho .av-grp{text-align:center;font-weight:700;letter-spacing:.04em}
+.av-rho .av-sep{border-left:2px solid var(--line)}
+.av-rho .av-g-core{background:color-mix(in srgb,var(--info) 10%,var(--surface))}
+.av-rho .av-g-promo{background:color-mix(in srgb,var(--good) 10%,var(--surface))}
+.av-rho .av-g-kvi{background:var(--surface-2)}
+.av-rho .av-g-all{background:color-mix(in srgb,var(--series-1) 12%,var(--surface))}
+.av-rho th.av-red{color:var(--bad)}
+.av-rho td.av-red{color:var(--ink-3)}
+.av-rho td.av-red.has{background:var(--bad);color:#fff;font-weight:700}
+.av-rho tr[data-gpick]{cursor:pointer}
+.av-rho tr.av-total td{font-weight:700;border-top:2px solid var(--line);background:var(--surface-2)}

@@ -188,14 +188,15 @@
     const size = sp.pageSize || 50, pages = Math.max(1, Math.ceil(rows.length / size));
     t.page = Math.min(t.page, pages);
     const slice = rows.slice((t.page - 1) * size, t.page * size);
-    const th = sp.cols.map((c) => {
+    const shown = sp.cols.filter((c) => !c.hide);
+    const th = shown.map((c) => {
       const active = t.sort === c.k;
       const arrow = active ? (t.dir === "asc" ? "↑" : "↓") : "↕";
       return `<th class="${c.num ? "num" : ""}" scope="col"><button class="sort-button${active ? " active" : ""}" data-sort="${c.k}">${esc(c.label)}<span>${arrow}</span></button></th>`;
     }).join("");
     const body = slice.length
-      ? slice.map((r) => `<tr ${sp.rowAttr ? sp.rowAttr(r) : ""}>${sp.cols.map((c) => `<td class="${c.num ? "num" : ""}">${c.fmt ? c.fmt(r) : esc(r[c.k])}</td>`).join("")}</tr>`).join("")
-      : `<tr><td colspan="${sp.cols.length}" class="empty">${esc(sp.empty || "No rows match the selected filters.")}</td></tr>`;
+      ? slice.map((r) => `<tr ${sp.rowAttr ? sp.rowAttr(r) : ""}>${shown.map((c) => `<td class="${c.num ? "num" : ""}">${c.fmt ? c.fmt(r) : esc(r[c.k])}</td>`).join("")}</tr>`).join("")
+      : `<tr><td colspan="${shown.length}" class="empty">${esc(sp.empty || "No rows match the selected filters.")}</td></tr>`;
     const had = document.activeElement?.dataset?.tsearch === id;
     el.innerHTML = `
       <div class="panel-head"><div><h2>${esc(sp.title)}</h2><p>${esc(sp.desc(rows.length))}</p></div>
@@ -2721,16 +2722,16 @@
   // Columns shared by every availability table.
   function avCols(first, countLabel) {
     return [first, ...(countLabel ? [{ k: "n", label: countLabel, num: 1, fmt: (x) => int(x.n) }] : []),
-      { k: "slots", label: "Pairs", num: 1, fmt: (x) => int(x.slots) },
+      { k: "slots", label: "Pairs", num: 1, fmt: (x) => int(x.slots), hide: 1 },
       { k: "ok", label: "Available", num: 1, fmt: (x) => int(x.ok) },
       { k: "rate", label: "Availability", num: 1, val: (x) => avRate(x), fmt: (x) => `<span class="rate-pair"><strong>${avPct(x)}</strong>${chip(avBand(avRate(x)))}</span>`, csv: (x) => (isNum(avRate(x)) ? (avRate(x) * 100).toFixed(2) : "") },
       { k: "oos", label: "Out of stock", num: 1, val: (x) => x.st[2], fmt: (x) => int(x.st[2]), csv: (x) => x.st[2] },
-      { k: "below", label: "Below cover", num: 1, val: (x) => x.st[1], fmt: (x) => int(x.st[1]), csv: (x) => x.st[1] },
-      { k: "nsin", label: "No sales, in stock", num: 1, val: (x) => x.st[3], fmt: (x) => int(x.st[3]), csv: (x) => x.st[3] },
-      { k: "nsout", label: "No sales, no stock", num: 1, val: (x) => x.st[4], fmt: (x) => int(x.st[4]), csv: (x) => x.st[4] },
-      { k: "stock", label: "Stock (units)", num: 1, fmt: (x) => int(x.stock), csv: (x) => Math.round(x.stock) },
-      { k: "perDay", label: "Sales per day", num: 1, fmt: (x) => int(x.perDay), csv: (x) => x.perDay.toFixed(2) },
-      { k: "short", label: "Shortfall (units)", num: 1, fmt: (x) => (x.short ? `<span class="down">${int(x.short)}</span>` : "0"), csv: (x) => Math.round(x.short) }];
+      { k: "below", label: "Below cover", num: 1, val: (x) => x.st[1], fmt: (x) => int(x.st[1]), csv: (x) => x.st[1], hide: 1 },
+      { k: "nsin", label: "No sales, in stock", num: 1, val: (x) => x.st[3], fmt: (x) => int(x.st[3]), csv: (x) => x.st[3], hide: 1 },
+      { k: "nsout", label: "No sales, no stock", num: 1, val: (x) => x.st[4], fmt: (x) => int(x.st[4]), csv: (x) => x.st[4], hide: 1 },
+      { k: "stock", label: "Stock (units)", num: 1, fmt: (x) => int(x.stock), csv: (x) => Math.round(x.stock), hide: 1 },
+      { k: "perDay", label: "Sales per day", num: 1, fmt: (x) => int(x.perDay), csv: (x) => x.perDay.toFixed(2), hide: 1 },
+      { k: "short", label: "Shortfall (units)", num: 1, fmt: (x) => (x.short ? `<span class="down">${int(x.short)}</span>` : "0"), csv: (x) => Math.round(x.short), hide: 1 }];
   }
   const avOutletFirst = { k: "name", label: "Outlet", val: (x) => x.name, fmt: (x) => `<span class="cell-primary">${esc(x.code)} · ${esc(x.name)}</span><span class="cell-secondary">${esc(x.sub)}</span>`, csv: (x) => `${x.code} ${x.name}` };
   const avSkuFirst = { k: "name", label: "SKU", val: (x) => x.name, fmt: (x) => `<span class="cell-primary">${esc(x.name)}</span><span class="cell-secondary">${esc(x.code)} · ${esc(x.sub)}</span>`, csv: (x) => `${x.code} ${x.name}` };
@@ -2779,6 +2780,61 @@
       cols: avCols({ k: "name", label: AV_LEVELS[level], val: (x) => x.name, fmt: (x) => `<span class="cell-primary">${esc(x.name)}</span>`, csv: (x) => x.name }, bySku ? "SKUs" : "Outlets") });
   }
 
+  // RHO wise overall availability: per regional leader, the average of their outlets' own availability
+  // for Core, Promo, KVI and all three together, and how many outlets fall in each band.
+  const AV_BANDS = ["91%-100%", "81%-90%", "71%-80%", "61%-70%", "Below 60%"];
+  const avBandIdx = (r) => { const x = Math.round(r * 100); return x >= 91 ? 0 : x >= 81 ? 1 : x >= 71 ? 2 : x >= 61 ? 3 : 4; };
+  const AV_KINDS = [["core", "Core"], ["promo", "Promo"], ["kvi", "KVI"], ["all", "Overall"]];
+  // Outlets missing from Zone Distribution (the build labels them "Not in outlet master") read as Unassigned.
+  const avIsMiss = (v) => v === NET_MISS || v === "Not in outlet master";
+  const avUnassigned = (v) => (avIsMiss(v) ? "Unassigned" : v);
+  function avRhoStats(outs, scans) {
+    const x = { n: outs.length };
+    AV_KINDS.forEach(([k]) => {
+      const rates = outs.map((o) => avRate(scans[k].byO.get(o.i) || avAcc())).filter(isNum);
+      x[k] = rates.length ? rates.reduce((a, b) => a + b, 0) / rates.length : null;
+      x[k + "B"] = [0, 0, 0, 0, 0];
+      rates.forEach((r) => x[k + "B"][avBandIdx(r)]++);
+    });
+    return x;
+  }
+  function avRhoMatrix(scans) {
+    const id = "av-rho", gd = gdrill(id, "rl"), outs = scans.all.outs;
+    if (gd) {
+      const rows = outs.filter((o) => o.dim.rl === gd.key).map((o) => {
+        const r = { code: o.c, name: o.n, sub: `${avUnassigned(o.dim.zn)} · ${o.dim.fmt}`, o, oos: (scans.all.byO.get(o.i) || avAcc()).st[2] };
+        AV_KINDS.forEach(([k]) => (r[k] = avRate(scans[k].byO.get(o.i) || avAcc())));
+        return r;
+      });
+      const pc = (k, label) => ({ k, label, num: 1, fmt: (x) => `<span class="rate-pair"><strong>${pct(x[k], 1)}</strong>${chip(avBand(x[k]))}</span>`, csv: (x) => (isNum(x[k]) ? (x[k] * 100).toFixed(2) : "") });
+      return mountTable("av-rho-o", { title: `${avUnassigned(gd.key)}: outlet wise availability`, file: `availability_outlets_${gd.key}`, stamp: S.av.generatedAt.slice(0, 10), banner: gBanner(id, gd),
+        desc: (n) => `${int(n)} outlets, lowest overall first. Click an outlet for the items it is missing.`,
+        rows, key: (x) => x.code, searchText: (x) => `${x.code} ${x.name} ${x.sub}`, defaultSort: "all", defaultDir: "asc",
+        rowAttr: (x) => `data-avoutlet="${esc(x.code)}" data-avtype="all" tabindex="0"`,
+        cols: [avOutletFirst, pc("core", "Core"), pc("promo", "Promo"), pc("kvi", "KVI"), pc("all", "Overall"), { k: "oos", label: "Out of stock items", num: 1, fmt: (x) => int(x.oos) }] });
+    }
+    const by = new Map();
+    outs.forEach((o) => { if (!by.has(o.dim.rl)) by.set(o.dim.rl, []); by.get(o.dim.rl).push(o); });
+    // Largest portfolio first; Unassigned last.
+    const groups = [...by].map(([name, os]) => ({ name, ...avRhoStats(os, scans) })).sort((a, b) => avIsMiss(a.name) - avIsMiss(b.name) || b.n - a.n);
+    const total = { name: "Total", ...avRhoStats(outs, scans) };
+    const pc = (v) => (isNum(v) ? `${Math.round(v * 100)}%` : "—");
+    const cells = (x) => `<td class="num">${int(x.n)}</td>${["core", "promo", "kvi"].map((k) => `<td class="num av-g-${k}">${pc(x[k])}</td>`).join("")}
+      ${AV_KINDS.map(([k]) => `<td class="num av-g-${k} av-sep"><strong>${pc(x[k])}</strong></td>${x[k + "B"].map((c, i) => `<td class="num${i >= 2 ? " av-red" : ` av-g-${k}`}${i >= 2 && c ? " has" : ""}">${int(c)}</td>`).join("")}`).join("")}`;
+    NCSV.avrho = () => ["availability_rho_wise", ["RHO", "Outlet Qty", "Core Avg %", "Promo Avg %", "KVI Avg %", ...AV_KINDS.flatMap(([, l]) => [`${l} Avg %`, ...AV_BANDS.map((b) => `${l} ${b}`)])],
+      [...groups, total].map((x) => [avUnassigned(x.name), x.n, ...["core", "promo", "kvi"].map((k) => (isNum(x[k]) ? (x[k] * 100).toFixed(2) : "")), ...AV_KINDS.flatMap(([k]) => [isNum(x[k]) ? (x[k] * 100).toFixed(2) : "", ...x[k + "B"]])]), S.av.generatedAt.slice(0, 10)];
+    return `<section class="panel"><div class="panel-head"><div><h2>RHO wise overall availability</h2><p>Avg % is the average of each outlet's own availability at ${avDays()} day${avDays() === 1 ? "" : "s"} of cover; the band columns count outlets. Click a regional leader for their outlets.</p></div><div class="panel-tools">${csvBtn("avrho")}</div></div>
+      <div class="table-wrap av-rho"><table><thead>
+        <tr><th rowspan="2">RHO</th><th rowspan="2" class="num">Outlet Qty</th><th class="num av-g-core">Core</th><th class="num av-g-promo">Promo</th><th class="num av-g-kvi">KVI</th>
+          ${AV_KINDS.map(([k, l]) => `<th colspan="6" class="av-g-${k} av-sep av-grp">${l.toUpperCase()}</th>`).join("")}</tr>
+        <tr><th class="num av-g-core">Avg %</th><th class="num av-g-promo">Avg %</th><th class="num av-g-kvi">Avg %</th>
+          ${AV_KINDS.map(([k]) => `<th class="num av-g-${k} av-sep">Avg %</th>${AV_BANDS.map((b, i) => `<th class="num${i >= 2 ? " av-red" : ` av-g-${k}`}">${b}</th>`).join("")}`).join("")}</tr>
+      </thead><tbody>
+        ${groups.map((x) => `<tr data-gpick="${id}" data-glevel="rl" data-gkey="${esc(x.name)}" tabindex="0" title="List ${esc(avUnassigned(x.name))}'s outlets"><td class="cell-primary">${esc(avUnassigned(x.name))}</td>${cells(x)}</tr>`).join("")}
+        <tr class="av-total"><td class="cell-primary">Total</td>${cells(total)}</tr>
+      </tbody></table></div></section>`;
+  }
+
   // ---- pages
   function pageAVS() {
     const g = avGuard(); if (g) return g;
@@ -2792,7 +2848,7 @@
         ${avCard("Core", c.tot, "var(--series-2)")}${avCard("Promo", p.tot, "var(--series-3)")}${avCard("KVI", k.tot, "var(--series-1)")}
         ${avCard("E-Commerce", e.tot, "var(--series-4)", `<span>${int(e.byO.size)} outlets · YES assortment only</span>`)}
       </div></div>${avStrip(all.tot)}</section>
-      ${avGroupTable("av-sum-rl", all, "rl", "all")}
+      ${avRhoMatrix({ core: c, promo: p, kvi: k, all })}
       <div class="grid-h">${avOutletTable("av-sum-o", all, "Lowest outlets", "all", 10)}${avSkuTable("av-sum-s", all, "Lowest SKUs", "all", 10)}</div>`;
   }
   function pageAVType(type) {
