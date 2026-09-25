@@ -7,7 +7,7 @@
   --line:#21474f;--line-soft:#16343d;--ink:#e8f0f1;--ink-2:#a3bcc2;--ink-3:#7e9aa2;
   --series-1:#e2683a;--series-2:#58a7c9;--series-3:#c08a1e;--grid:#16343d;
   --scrim:rgba(4,6,10,.62);--shadow-lg:0 24px 64px rgba(0,0,0,.55);
-  --radius:14px;--radius-sm:7px;--radius-chip:4px;--rail-width:268px;
+  --radius:14px;--radius-sm:7px;--radius-chip:4px;--rail-width:241px;
   color-scheme:dark;
 }
 [data-theme="light"]{
