@@ -1445,8 +1445,8 @@
     });
 
     return `${sales}${glanceHtml}${league}
-      <div class="grid-h">${oversight}${shareBars("Coverage by division", "Outlet count and share of the outlets in view.", "division", "Division")}</div>
-      <div class="grid-h">${mix}${shareBars("Location type", "Where outlets trade.", "locationType", "Location type")}</div>
+      <div class="grid-h net-eq">${oversight}${mix}</div>
+      <div class="grid-h net-eq">${shareBars("Location type", "Where outlets trade.", "locationType", "Location type")}${shareBars("Coverage by division", "Outlet count and share of the outlets in view.", "division", "Division")}</div>
       ${launch}${register}
       <p class="muted" style="margin:0;font-size:11.5px">Outlet network data from the mother Google Drive folder${driveNote() ? `, synced ${esc(driveNote())}` : ""}. ${d.source?.lastMonth?.matchedOutlets ? `${esc(lm)} baseline on ${int(d.source.lastMonth.matchedOutlets)} outlets.` : ""}</p>`;
   }
