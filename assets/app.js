@@ -1338,7 +1338,7 @@
       ${ytd ? "" : kpi({ label: "Back to profit", value: `<span class="up">${int(rec)}</span>`, sub: "Loss-making last month", foot: "<span>Profitable this month</span>", accent: "var(--good)" }).replace('<div class="kpi"', '<div class="kpi kpi-click" data-lstat="back" tabindex="0" role="button" title="List the outlets back in profit"')}
       </div>
       <p class="muted" style="margin:0">${int(young)} of the ${int(losses.length)} loss-making outlets opened less than a year ago.</p>
-      ${leadPanel}<div class="lr-pair">${agePanel}${reasonPanel}</div>${grp}${list}`;
+      ${leadPanel}<div class="lr-row">${grp}<div class="lr-stack">${agePanel}${reasonPanel}</div></div>${list}`;
   }
   const peerCache = {};
   function peerMedians(fmt) {

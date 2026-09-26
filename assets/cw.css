@@ -229,3 +229,9 @@ tr.lr-top td{background:var(--bad-soft)}
 .hint-title:hover .hint-i,.hint-title:focus .hint-i{color:var(--info)}
 .panel-head p.hint-text{display:none;position:absolute;left:18px;top:calc(100% - 6px);z-index:6;max-width:min(640px,calc(100% - 36px));margin:0;padding:10px 12px;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-sm);box-shadow:0 8px 24px -10px rgba(0,0,0,.35);color:var(--ink-2);font-size:12px;line-height:1.45}
 .hint-title:hover+p.hint-text,.hint-title:focus+p.hint-text{display:block}
+/* Loss by regional leader (half width) beside age + primary reason */
+.lr-row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:stretch}
+.lr-stack{display:flex;flex-direction:column;gap:16px;min-width:0}
+.lr-row>#t-loss-grp{contain:size;display:flex;flex-direction:column;min-width:0}
+.lr-row>#t-loss-grp>.table-wrap{flex:1 1 0;min-height:0;max-height:none;overflow:auto}
+@media (max-width:1000px){.lr-row{grid-template-columns:1fr}.lr-row>#t-loss-grp{contain:none}.lr-row>#t-loss-grp>.table-wrap{flex:none;max-height:560px}}
