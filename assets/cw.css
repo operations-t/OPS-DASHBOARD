@@ -216,3 +216,6 @@ tr.k-sel td{background:color-mix(in srgb,var(--info) 12%,var(--surface))!importa
 .lr-bar i{display:block;height:8px;border-radius:999px;background:var(--bad);min-width:2px}
 .lr-bar span{font-size:11.5px;color:var(--ink-2);text-align:right;font-variant-numeric:tabular-nums}
 tr.lr-top td{background:var(--bad-soft)}
+.kpi-click{cursor:pointer;transition:border-color .15s}
+.kpi-click:hover,.kpi-click:focus-visible{border-color:var(--info)}
+.lr-dtools{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;font-size:12px}

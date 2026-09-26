@@ -591,6 +591,7 @@
     });
     $$("[data-gclear]", root).forEach((b) => (b.onclick = () => { delete S.gdrill[b.dataset.gclear]; render(); }));
     $$("[data-lreason]", root).forEach((b) => (b.onclick = () => openLossReason(b.dataset.lreason, b.dataset.lrl)));
+    $$("[data-lstat]", root).forEach((n) => { const go = (e) => { e.stopPropagation(); openLossStatus(n.dataset.lstat); }; n.onclick = go; n.onkeydown = (e) => { if (e.key === "Enter" && e.target === n) go(e); }; });
     // Leader tables (leaderDrill): level switch, drill down a level, breadcrumb back.
     const dGo = (n) => { const id = n.dataset.dtab; if (S.tables[id]) { S.tables[id].page = 1; S.tables[id].q = ""; } render(); requestAnimationFrame(() => $("#t-" + id)?.scrollIntoView({ block: "start" })); };
     $$("[data-dlvl]", root).forEach((b) => (b.onclick = () => { S[b.dataset.dst] = { lvl: b.dataset.dlvl, rl: null, zn: null }; dGo(b); }));
@@ -1171,16 +1172,45 @@
     const top = Object.entries(g).sort((a, b) => b[1] - a[1])[0];
     return { reason: top[0], gap: top[1], gaps: g, exp, split: !!x, peers: pe.n, fmt };
   }
-  function openLossReason(reason, rl) {
-    const rows = inView().map((o) => ({ o, ...pnlCalc(o) })).filter((x) => x.loss && (!rl || x.o.dim.rl === rl)).map((x) => ({ ...x, why: lossReason(x.o) })).filter((x) => !reason || x.why.reason === reason).sort((a, b) => a.pl - b.pl);
+  // Drawer list of outlets from the loss page, with a CSV of exactly what is shown.
+  function openLossRows(title, rows, stats, file) {
+    const P = S.data.pnl, ytd = S.pm === "ytd";
+    rows.forEach((x) => { if (x.loss && !x.why) x.why = lossReason(x.o); });
     S.lastFocus = document.activeElement; S.ageDrill = null;
-    $("#drawerTitle").textContent = `${reason || "All reasons"}${rl ? `, ${rl}` : ""}`;
-    $("#drawerBody").innerHTML = `<div class="stat-grid three"><div class="stat"><small>Loss-making outlets</small><strong>${int(rows.length)}</strong></div><div class="stat"><small>Total loss</small><strong class="down">${bdt(rows.reduce((t, x) => t + x.pl, 0))}</strong></div><div class="stat"><small>Primary reason</small><strong style="font-size:18px">${esc(reason || "Any")}</strong></div></div>
-      <div class="table-wrap" style="max-height:560px"><table class="compact"><thead><tr><th>Outlet</th><th class="num">Sales</th><th class="num">P/L</th><th>Primary reason</th><th class="num">Gap vs peers</th></tr></thead><tbody>
-      ${rows.map((x) => `<tr data-pnl="${esc(x.o.c)}" tabindex="0" class="k-click"><td><span class="cell-primary">${esc(x.o.nm)}</span><span class="cell-secondary">${esc(x.o.c)}, ${esc(x.o.dim.rl)}, ${esc(x.o.dim.zn)}</span></td><td class="num">${bdt(x.o.s)}</td><td class="num"><strong class="down">${bdt(x.pl)}</strong></td><td>${esc(x.why.reason)}</td><td class="num">${bdt(x.why.gap)}</td></tr>`).join("") || '<tr><td colspan="5" class="empty">No outlets.</td></tr>'}</tbody></table></div>
-      <p class="muted" style="margin:0;font-size:12px">Gap vs peers is how many taka this reason costs the outlet against the median profitable outlet of its format. Click an outlet for its full breakdown.</p>`;
+    NCSV.lossdrill = () => [file, ["Outlet code", "Outlet", "Regional leader", "Zonal", "Sales", "P/L", ...(ytd ? [] : ["P/L last month", "Change"]), "Status", "Primary reason", "Gap vs peers"],
+      rows.map((x) => [x.o.c, x.o.nm, x.o.dim.rl, x.o.dim.zn, Math.round(x.o.s || 0), isNum(x.pl) ? Math.round(x.pl) : "", ...(ytd ? [] : [isNum(x.pl0) ? Math.round(x.pl0) : "", isNum(x.chg) ? Math.round(x.chg) : ""]),
+        x.loss ? LOSS_STATUS[x.st]?.label || "Loss-making" : "Profitable", x.why?.reason || "", isNum(x.why?.gap) ? Math.round(x.why.gap) : ""]), ytd ? "ytd" : S.pm];
+    $("#drawerTitle").textContent = title;
+    $("#drawerBody").innerHTML = `<div class="stat-grid three">${stats.map(([l, v, cls]) => `<div class="stat"><small>${l}</small><strong${cls ? ` class="${cls}"` : ""}>${v}</strong></div>`).join("")}</div>
+      <div class="lr-dtools"><span class="muted">${int(rows.length)} outlets. Click an outlet for its full breakdown.</span>${csvBtn("lossdrill")}</div>
+      <div class="table-wrap" style="max-height:560px"><table class="compact"><thead><tr><th>Outlet</th><th class="num">Sales</th><th class="num">P/L</th>${ytd ? "" : '<th class="num">P/L last month</th>'}<th>Primary reason</th><th class="num">Gap vs peers</th></tr></thead><tbody>
+      ${rows.map((x) => `<tr data-pnl="${esc(x.o.c)}" tabindex="0" class="k-click"><td><span class="cell-primary">${esc(x.o.nm)}</span><span class="cell-secondary">${esc(x.o.c)}, ${esc(x.o.dim.rl)}, ${esc(x.o.dim.zn)}</span></td><td class="num">${bdt(x.o.s)}</td><td class="num"><strong class="${x.pl < 0 ? "down" : "up"}">${bdt(x.pl)}</strong></td>${ytd ? "" : `<td class="num"><span class="${x.pl0 < 0 ? "down" : "up"}">${bdt(x.pl0)}</span></td>`}<td>${esc(x.why?.reason || "—")}</td><td class="num">${isNum(x.why?.gap) ? bdt(x.why.gap) : "—"}</td></tr>`).join("") || `<tr><td colspan="${ytd ? 5 : 6}" class="empty">No outlets.</td></tr>`}</tbody></table></div>
+      <p class="muted" style="margin:0;font-size:12px">Primary reason and gap vs peers apply to loss-making outlets: the taka the reason costs against the median profitable outlet of the same format.</p>`;
     wireDyn($("#drawerBody"));
     showDrawer();
+  }
+  const lossRowsInView = () => inView().map((o) => ({ o, ...pnlCalc(o) })).filter((x) => !x.closed);
+  const lossSlug = (t) => String(t).toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+  function openLossReason(reason, rl) {
+    const rows = lossRowsInView().filter((x) => x.loss && (!rl || x.o.dim.rl === rl)).map((x) => ({ ...x, why: lossReason(x.o) })).filter((x) => !reason || x.why.reason === reason).sort((a, b) => a.pl - b.pl);
+    openLossRows(`${reason || "All reasons"}${rl ? `, ${rl}` : ""}`, rows,
+      [["Loss-making outlets", int(rows.length)], ["Total loss", bdt(rows.reduce((t, x) => t + x.pl, 0)), "down"], ["Primary reason", `<span style="font-size:18px">${esc(reason || "Any")}</span>`]],
+      `loss_reason_${lossSlug(reason || "all")}${rl ? "_" + lossSlug(rl) : ""}_${S.pbasis}`);
+  }
+  // New losses, widening, narrowing and back to profit, from the KPI cards.
+  function openLossStatus(kind) {
+    const all = lossRowsInView();
+    const def = {
+      new: ["New losses", "Profitable last month, loss-making this month", (x) => x.loss && x.st === "new"],
+      wide: ["Loss widening", "Loss-making both months, bigger loss this month", (x) => x.loss && x.st === "wide"],
+      narrow: ["Loss narrowing", "Loss-making both months, smaller loss this month", (x) => x.loss && x.st === "narrow"],
+      back: ["Back to profit", "Loss-making last month, profitable this month", (x) => !x.loss && isNum(x.pl0) && x.pl0 < 0],
+    }[kind];
+    const rows = all.filter(def[2]).sort((a, b) => (kind === "back" ? b.pl - a.pl : a.pl - b.pl));
+    const sumPl = rows.reduce((t, x) => t + (x.pl || 0), 0), sumPl0 = rows.reduce((t, x) => t + (x.pl0 || 0), 0);
+    openLossRows(`${def[0]}, ${fmonth(S.pm)}`, rows,
+      [[def[1], int(rows.length)], ["P/L this month", `<span class="${sumPl < 0 ? "down" : "up"}">${bdt(sumPl)}</span>`], ["P/L last month", `<span class="${sumPl0 < 0 ? "down" : "up"}">${bdt(sumPl0)}</span>`]],
+      `loss_${kind}_${S.pbasis}`);
   }
   function pageLoss() {
     const P = S.data.pnl;
@@ -1295,8 +1325,8 @@
       <div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
       ${kpi({ hero: true, label: `Loss-making outlets, ${periodName}`, value: int(losses.length), sub: `${chip({ cls: "bad", label: pct(losses.length / (all.length || 1)) + " of outlets" })}<span>of ${int(all.length)} trading outlets, ${basisLbl}</span>`, foot: `<span>Total loss ${bdt(totLoss)}</span><span>Net outlet P/L ${bdt(net)}</span><span>${int(closedL.length)} closed outlets excluded (P/L ${bdt(sum(closedL, "pl"))})</span>`, accent: "var(--bad)" })}
       ${kpi({ label: "Total loss", value: `<span class="down">${bdt(totLoss)}</span>`, sub: "Sum of loss-making outlets", foot: `<span>Average ${bdt(losses.length ? totLoss / losses.length : null)} per outlet</span>`, accent: "var(--bad)" })}
-      ${ytd ? "" : kpi({ label: "New losses", value: int(newL), sub: "Profitable last month", foot: `<span>Widening ${int(losses.filter((x) => x.st === "wide").length)}, narrowing ${int(losses.filter((x) => x.st === "narrow").length)}</span>`, accent: "var(--warn)" })}
-      ${ytd ? "" : kpi({ label: "Back to profit", value: `<span class="up">${int(rec)}</span>`, sub: "Loss-making last month", foot: "<span>Profitable this month</span>", accent: "var(--good)" })}
+      ${ytd ? "" : kpi({ label: "New losses", value: int(newL), sub: "Profitable last month", foot: `<span><button type="button" class="age-drill-link" data-lstat="wide" title="Outlets whose loss widened">Widening ${int(losses.filter((x) => x.st === "wide").length)}</button>, <button type="button" class="age-drill-link" data-lstat="narrow" title="Outlets whose loss narrowed">narrowing ${int(losses.filter((x) => x.st === "narrow").length)}</button></span>`, accent: "var(--warn)" }).replace('<div class="kpi"', '<div class="kpi kpi-click" data-lstat="new" tabindex="0" role="button" title="List the new loss-making outlets"')}
+      ${ytd ? "" : kpi({ label: "Back to profit", value: `<span class="up">${int(rec)}</span>`, sub: "Loss-making last month", foot: "<span>Profitable this month</span>", accent: "var(--good)" }).replace('<div class="kpi"', '<div class="kpi kpi-click" data-lstat="back" tabindex="0" role="button" title="List the outlets back in profit"')}
       </div>
       <p class="muted" style="margin:0">${int(young)} of the ${int(losses.length)} loss-making outlets opened less than a year ago.</p>
       ${leadPanel}<div class="lr-pair">${agePanel}${reasonPanel}</div>${grp}${list}`;
