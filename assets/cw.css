@@ -246,3 +246,5 @@ tr.lr-top td{background:var(--bad-soft)}
 .lr-row>#t-loss-grp table{font-size:12px}
 .lr-row>#t-loss-grp th,.lr-row>#t-loss-grp td{padding-left:7px;padding-right:7px}
 .lr-row>#t-loss-grp .cell-secondary{font-size:11px}
+/* Overview top cards: titles stay on one line so the numbers line up (full title on hover) */
+.ov-kpis .kpi .label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
