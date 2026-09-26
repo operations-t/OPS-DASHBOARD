@@ -246,3 +246,5 @@ tr.lr-top td{background:var(--bad-soft)}
 .lr-row>#t-loss-grp table{font-size:12px}
 .lr-row>#t-loss-grp th,.lr-row>#t-loss-grp td{padding-left:7px;padding-right:7px}
 .lr-row>#t-loss-grp .cell-secondary{font-size:11px}
+/* Overview top cards: label, number, note and footer line up across each row, even when a title wraps */
+@supports (grid-template-rows:subgrid){.ov-kpis .kpi{display:grid;grid-row:span 4;grid-template-rows:subgrid;align-content:start}.ov-kpis .kpi .label{align-self:start}.ov-kpis .kpi .value{align-self:end}.ov-kpis .kpi .foot{margin-top:0;align-self:end}}
