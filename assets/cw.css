@@ -221,11 +221,11 @@ tr.lr-top td{background:var(--bad-soft)}
 .lr-dtools{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;font-size:12px}
 
 /* Panel description shown on hovering the title (hint-title + hint-text) */
-.panel-head:has(.hint-title){position:relative;flex-wrap:nowrap}
-.panel-head:has(.hint-title)>div:first-child{flex:1;min-width:0}
-.panel-head:has(.hint-title)>.panel-tools{flex:none}
+.panel-head:has(.hint-title){position:relative}
+.panel-head:has(.hint-title)>div:first-child{flex:1 1 auto;min-width:0}
+.panel-head:has(.hint-title)>.panel-tools{margin-left:auto;justify-content:flex-end}
 .hint-title{cursor:help;display:inline-flex;align-items:center;gap:6px;outline:none}
 .hint-i{font-size:13px;color:var(--ink-3);font-weight:400}
-.hint-title:hover .hint-i,.hint-title:focus-visible .hint-i{color:var(--info)}
+.hint-title:hover .hint-i,.hint-title:focus .hint-i{color:var(--info)}
 .panel-head p.hint-text{display:none;position:absolute;left:18px;top:calc(100% - 6px);z-index:6;max-width:min(640px,calc(100% - 36px));margin:0;padding:10px 12px;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-sm);box-shadow:0 8px 24px -10px rgba(0,0,0,.35);color:var(--ink-2);font-size:12px;line-height:1.45}
-.hint-title:hover+p.hint-text,.hint-title:focus-visible+p.hint-text{display:block}
+.hint-title:hover+p.hint-text,.hint-title:focus+p.hint-text{display:block}

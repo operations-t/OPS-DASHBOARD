@@ -549,6 +549,15 @@
   const cmpSeg = () => seg("cmp", [["y", "vs last year"], ["m", "vs last month"]], "Compare with");
 
   function wireDyn(root) {
+    // Panels with a CSV button: the description shows on hovering the title, so the tools stay on the right.
+    $$(".panel-head", root).forEach((h) => {
+      if (!h.querySelector("[data-csv],[data-ncsv]")) return;
+      const t = h.querySelector(":scope > div > h2"), d = t && t.nextElementSibling;
+      if (!t || t.classList.contains("hint-title") || !d || d.tagName !== "P" || !d.textContent.trim()) return;
+      t.classList.add("hint-title"); t.tabIndex = 0;
+      t.insertAdjacentHTML("beforeend", ' <span class="hint-i" aria-hidden="true">ⓘ</span>');
+      d.classList.add("hint-text");
+    });
     $$("[data-age-band]", root).forEach((b) => (b.onclick = () => openAgeOutlets(b.dataset.ageBand, b.dataset.ageScope === "loss")));
     $$("[data-outlet]", root).forEach((tr) => { tr.onclick = () => openOutlet(tr.dataset.outlet); tr.onkeydown = (e) => { if (e.key === "Enter") openOutlet(tr.dataset.outlet); }; });
     $$("[data-pnl]", root).forEach((tr) => { tr.onclick = () => openPnl(tr.dataset.pnl); tr.onkeydown = (e) => { if (e.key === "Enter") openPnl(tr.dataset.pnl); }; });
