@@ -1014,7 +1014,7 @@
           ...cats.map((c, i) => ({ k: `c${i}`, label: catShort(c), num: 1, fmt: (x) => (x.cats[c] ? `<span class="k-pill ${kCell(x[`c${i}`])}">${pct(x[`c${i}`], 1)}</span><span class="cell-secondary">${x.cats[c].pts.toFixed(1)} of ${int(x.cats[c].w)}</span>` : "—"), csv: (x) => pcsv(x[`c${i}`]) })),
           { k: "leak", label: "Biggest loss", fmt: (x) => (x.leak ? `<span class="cell-primary">${esc(kShort(x.leak.metric))}</span><span class="cell-secondary">−${x.leak.lost.toFixed(2)} pts</span>` : "—"), csv: (x) => x.leak?.metric || "", val: (x) => x.leak?.lost }],
       });
-      body = `<div class="k-two">${kpiScorecard(V, lvlP)}${kpiCards(V, lvlP)}</div>${kpiTrend(V)}${table}${kpiMatrix(V, lvlP, prev)}`;
+      body = `<div class="k-two">${kpiScorecard(V, lvlP)}${kpiCards(V, lvlP)}</div>${table}${kpiMatrix(V, lvlP, prev)}${kpiTrend(V)}`;
     }
     if (S.kfocus) { const f = S.kfocus; S.kfocus = null; AFTER.push(() => $(f)?.scrollIntoView({ block: "start" })); }
     AFTER.push(() => { const t = $(".topbar"); if (t) document.documentElement.style.setProperty("--k-top", t.offsetHeight + "px"); });
