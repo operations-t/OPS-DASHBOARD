@@ -1214,11 +1214,12 @@
       wide: ["Loss widening", "Loss-making both months, bigger loss this month", (x) => x.loss && x.st === "wide"],
       narrow: ["Loss narrowing", "Loss-making both months, smaller loss this month", (x) => x.loss && x.st === "narrow"],
       back: ["Back to profit", "Loss-making last month, profitable this month", (x) => !x.loss && isNum(x.pl0) && x.pl0 < 0],
+      established: ["Established outlets in loss", "Loss-making outlets open a year or more", (x) => x.loss && x.age != null && x.age >= 12],
     }[kind];
     const rows = all.filter(def[2]).sort((a, b) => (kind === "back" ? b.pl - a.pl : a.pl - b.pl));
     const sumPl = rows.reduce((t, x) => t + (x.pl || 0), 0), sumPl0 = rows.reduce((t, x) => t + (x.pl0 || 0), 0);
-    openLossRows(`${def[0]}, ${fmonth(S.pm)}`, rows,
-      [[def[1], int(rows.length)], ["P/L this month", `<span class="${sumPl < 0 ? "down" : "up"}">${bdt(sumPl)}</span>`], ["P/L last month", `<span class="${sumPl0 < 0 ? "down" : "up"}">${bdt(sumPl0)}</span>`]],
+    openLossRows(`${def[0]}, ${S.pm === "ytd" ? "year to date" : fmonth(S.pm)}`, rows,
+      [[def[1], int(rows.length)], [S.pm === "ytd" ? "P/L year to date" : "P/L this month", `<span class="${sumPl < 0 ? "down" : "up"}">${bdt(sumPl)}</span>`], ["P/L last month", `<span class="${sumPl0 < 0 ? "down" : "up"}">${bdt(sumPl0)}</span>`]],
       `loss_${kind}_${S.pbasis}`);
   }
   function pageLoss() {
@@ -1334,6 +1335,7 @@
       <div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
       ${kpi({ hero: true, label: `Loss-making outlets, ${periodName}`, value: int(losses.length), sub: `${chip({ cls: "bad", label: pct(losses.length / (all.length || 1)) + " of outlets" })}<span>of ${int(all.length)} trading outlets, ${basisLbl}</span>`, foot: `<span>Total loss ${bdt(totLoss)}</span><span>Net outlet P/L ${bdt(net)}</span><span>${int(closedL.length)} closed outlets excluded (P/L ${bdt(sum(closedL, "pl"))})</span>`, accent: "var(--bad)" })}
       ${kpi({ label: "Total loss", value: `<span class="down">${bdt(totLoss)}</span>`, sub: "Sum of loss-making outlets", foot: `<span>Average ${bdt(losses.length ? totLoss / losses.length : null)} per outlet</span>`, accent: "var(--bad)" })}
+      ${(() => { const est = losses.filter((x) => x.age != null && x.age >= 12), el = sum(est, "pl"); return kpi({ label: "Established outlets in loss", value: `<span class="down">${int(est.length)}</span>`, sub: "Open a year or more", foot: `<span>Loss ${bdt(el)}</span><span>${totLoss ? pct(el / totLoss, 0) : "—"} of total loss</span>`, accent: "var(--bad)" }).replace('<div class="kpi"', '<div class="kpi kpi-click" data-lstat="established" tabindex="0" role="button" title="List loss-making outlets open a year or more"'); })()}
       ${ytd ? "" : kpi({ label: "New losses", value: int(newL), sub: "Profitable last month", foot: `<span><button type="button" class="age-drill-link" data-lstat="wide" title="Outlets whose loss widened">Widening ${int(losses.filter((x) => x.st === "wide").length)}</button>, <button type="button" class="age-drill-link" data-lstat="narrow" title="Outlets whose loss narrowed">narrowing ${int(losses.filter((x) => x.st === "narrow").length)}</button></span>`, accent: "var(--warn)" }).replace('<div class="kpi"', '<div class="kpi kpi-click" data-lstat="new" tabindex="0" role="button" title="List the new loss-making outlets"')}
       ${ytd ? "" : kpi({ label: "Back to profit", value: `<span class="up">${int(rec)}</span>`, sub: "Loss-making last month", foot: "<span>Profitable this month</span>", accent: "var(--good)" }).replace('<div class="kpi"', '<div class="kpi kpi-click" data-lstat="back" tabindex="0" role="button" title="List the outlets back in profit"')}
       </div>
