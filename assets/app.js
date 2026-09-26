@@ -845,7 +845,7 @@
     const ms = V.metrics, rho = S.kl === "rho";
     const cell = (h, m) => h.metrics.find((x) => x.metric === m.metric);
     const unit = (m) => (/\(in cr\)/i.test(m.metric) ? "Cr" : /%|growth|churn|skill|assessment|audit/i.test(m.metric) ? "%" : "");
-    const num = (m, v) => (!isNum(v) ? "—" : unit(m) === "Cr" ? v.toFixed(2) : unit(m) === "%" ? (v * 100).toFixed(Math.abs(v) < 0.01 ? 3 : Math.abs(v) < 0.1 ? 2 : 1) : Number.isInteger(v) ? String(v) : v.toFixed(2));
+    const num = (m, v) => (!isNum(v) ? "—" : unit(m) === "Cr" ? v.toFixed(2) : unit(m) === "%" ? (v * 100).toFixed(Math.abs(v) < 0.1 ? 2 : 1) + "%" : Number.isInteger(v) ? String(v) : v.toFixed(2));
     const td = (c, m) => {
       const v = c?.avg ? c.aAvg : c?.a;
       const tip = !c ? "" : c.avg ? `average actual of ${c.n} · ${pct(c.ach, 1)} average achievement` : `actual ${kfmt(m.metric, c.a)} · target ${kfmt(m.metric, c.t)} · ${pct(c.ach, 1)} achieved`;
@@ -856,7 +856,7 @@
       V.heads.map((h) => [h.head, h.rank, pcsv(h.score), ...ms.flatMap((m) => { const c = cell(h, m); return [raw(m, c?.a), raw(m, c?.t), pcsv(c?.ach)]; })]), V.P.k];
     const refRow = V.ref ? `<tr class="k-ref"><td>${esc(V.refName)}${V.ref.avg ? ' <small class="cell-secondary">average</small>' : ""}</td><td></td><td class="num"><strong>${pct(V.ref.score, 1)}</strong></td>${ms.map((m) => td(cell(V.ref, m), m)).join("")}</tr>` : "";
     return `<section class="panel k-mat"><div class="panel-head"><div><h2>KPI heat-matrix, ${esc(V.P.label)}${S.krho ? ` · ${esc(S.krho)}` : ""}</h2><p>Achieved number on every KPI, coloured by achievement against each head's own target: green 90%+, amber 70–89%, red under 70%. Hover a cell for its target. ${rho ? "Click a row for that RHO's zonals, " : ""}click a name for the KPI breakdown, or a KPI heading to rank everyone on it.</p></div><div class="panel-tools">${kBackBtns()}${csvBtn("kmatrix")}</div></div>
-      <div class="table-wrap" style="max-height:640px"><table><thead><tr><th>${rho ? "RHO" : "Zonal"}</th><th class="num">Rank</th><th class="num">Score</th>${ms.map((m) => `<th class="k-mh" data-kmetric="${esc(m.metric)}" tabindex="0" title="${esc(m.metric)} · weight ${int(m.w)}${m.dir.startsWith("lower") ? " · lower is better" : ""}">${esc(kShort(m.metric))}<small>${unit(m) ? `${unit(m)} · ` : ""}w${int(m.w)}</small></th>`).join("")}</tr></thead><tbody>
+      <div class="table-wrap" style="max-height:640px"><table><thead><tr><th>${rho ? "RHO" : "Zonal"}</th><th class="num">Rank</th><th class="num">Score</th>${ms.map((m) => `<th class="k-mh" data-kmetric="${esc(m.metric)}" tabindex="0" title="${esc(m.metric)} · weight ${int(m.w)}${m.dir.startsWith("lower") ? " · lower is better" : ""}">${esc(kShort(m.metric))}<small>${unit(m) === "Cr" ? "Cr · " : ""}w${int(m.w)}</small></th>`).join("")}</tr></thead><tbody>
       ${refRow}${V.heads.map((h) => `<tr${rho ? ` data-kdrill="${esc(h.head)}" tabindex="0" class="k-click"` : ""}><td><span class="k-name" data-khead="${esc(h.head)}" tabindex="0" role="button">${esc(h.head)}</span>${rho ? "" : `<small class="cell-secondary">RHO ${esc(V.zr[h.head] || "—")}</small>`}</td><td class="num">${int(h.rank)} ${kMove(prev, h)}</td><td class="num"><strong>${pct(h.score, 1)}</strong></td>${ms.map((m) => td(cell(h, m), m)).join("")}</tr>`).join("")}
       </tbody></table></div></section>`;
   }
