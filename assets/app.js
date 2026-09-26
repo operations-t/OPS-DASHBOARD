@@ -436,6 +436,16 @@
     };
   }
 
+  // Overview top cards: titles in the same row get the height of the tallest one, so the numbers line up.
+  // Cards in a grid row are already as tall as the tallest card, so this never makes a card taller.
+  function alignKpiTitles() {
+    const cards = $$(".ov-kpis .kpi:not(.hero)");
+    cards.forEach((k) => (k.querySelector(".label").style.minHeight = ""));
+    const rows = new Map();
+    cards.forEach((k) => { const t = Math.round(k.getBoundingClientRect().top); rows.set(t, (rows.get(t) || []).concat(k)); });
+    rows.forEach((ks) => { const h = Math.max(...ks.map((k) => k.querySelector(".label").getBoundingClientRect().height)); ks.forEach((k) => (k.querySelector(".label").style.minHeight = h + "px")); });
+  }
+  window.addEventListener("resize", () => S.page === "overview" && alignKpiTitles());
   function pageOverview() {
     const r = rep(), list = inView(), a = agg(list);
     if (!r) return `<p class="empty">No sales report is loaded yet. Check the Data quality page.</p>`;
@@ -457,12 +467,13 @@
       rows: lrows, cols: achCols(r, at), key: (x) => x.key, searchText: (x) => `${x.name} ${x.sub}`, defaultSort: "a", pageSize: 25,
       rowAttr: (x) => (x.o ? outletAttr(x) : D.pick(x)),
     });
+    AFTER.push(alignKpiTitles);
     return `
       <div class="kpis ov-kpis">
         ${heroAchievement(a, r)}
         ${kpi({ label: "Sales growth vs last year", value: delta(a.gy), sub: "All stores", foot: `<span>${bdt(a.s)}</span><span>last year ${bdt(a.sy)}</span>`, accent: "var(--series-2)" })}
-        ${kpi({ label: "Same-store vs last year", value: delta(a.gss), sub: `${int(a.ssn)} same stores`, foot: `<span>${bdt(a.ssS)}</span><span>last year ${bdt(a.ssY)}</span>`, accent: "var(--series-2)" })}
-        ${kpi({ label: "Sales vs last month", value: delta(a.gm), sub: "All stores, same days", foot: `<span>${bdt(a.s)}</span><span>last month ${bdt(a.sm)}</span>`, accent: "var(--series-3)" })}
+        ${kpi({ label: "Same-store growth vs last year", value: delta(a.gss), sub: `${int(a.ssn)} same stores`, foot: `<span>${bdt(a.ssS)}</span><span>last year ${bdt(a.ssY)}</span>`, accent: "var(--series-2)" })}
+        ${kpi({ label: "Sales growth vs last month", value: delta(a.gm), sub: "All stores, same days", foot: `<span>${bdt(a.s)}</span><span>last month ${bdt(a.sm)}</span>`, accent: "var(--series-3)" })}
         ${kpi({ label: "Footfall vs last year", value: delta(growth(a.f, a.fy)), sub: "Customers, all stores", foot: `<span>${int(a.f)}</span><span>last year ${int(a.fy)}</span>`, accent: "var(--series-1)" })}
         ${kpi({ label: "Average bill value", value: bdt(a.bk), sub: delta(growth(a.bk, a.bky)) + " vs last year", foot: `<span>${bdt(a.bk)}</span><span>last year ${bdt(a.bky)}</span>`, accent: "var(--series-1)" })}
         ${kpi({ label: "Gross profit margin", value: pct(a.gp), sub: `${delta(isNum(a.gp) && isNum(a.gpy) ? a.gp - a.gpy : null, "pp")} vs last year ${pct(a.gpy)}`, foot: `<span>GP ${bdt(a.gv)}</span><span>last year ${bdt(a.gvy)}</span>`, accent: "var(--series-3)" })}
