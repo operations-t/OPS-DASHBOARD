@@ -43,7 +43,7 @@
   const S = { data: null, page: "overview", period: "tilldate", filters: {}, openDim: null, tables: {}, level: "rl", bands: new Set(), lastFocus: null,
     cmp: "y", scope: "all", trend: "all", kp: null, kl: "rho", kv: "rank", krho: null, klh: null, kfocus: null, pm: null, pbasis: "before", pstat: "all", plevel: "rl", ageDrill: null,
     net: null, netLoading: false, netErr: null, netMode: "through", netFrom: "", netTo: "",
-    gdrill: {}, ov: { lvl: "rl", rl: null, zn: null }, lv: { lvl: "rl", rl: null, zn: null },
+    gdrill: {}, ov: { lvl: "rl", rl: null, zn: null }, lv: { lvl: "rl", rl: null, zn: null }, cwh: { lvl: "rl", rl: null, zn: null },
     cw: null, cwLoading: false, cwErr: null, cwCrit: null,
     av: null, avLoading: false, avErr: null, avv: { days: "2", nd: "", cat3: "", type: "all", level: "rl", kviOnly: "no", glevel: "zn", elevel: "outlet" },
     cwv: { from: "", to: "", compare: false, status: "all", statusMetric: "consumableRate", basis: "daily", rankDim: "zone", rankMetric: "consumableRate", moversMetric: "consumableRate", leagueDim: "zone", leagueMetric: "consumableRate", excMetric: "all", benchMetric: "consumableRate" },
@@ -413,15 +413,15 @@
 
   // Three-level drill for leader tables: regional leader > zonal > outlet.
   // st is the state key in S ({ lvl, rl, zn }), id the table id, list the outlets (each with .dim) used to map zonals to leaders.
-  function leaderDrill(st, id, list, hint) {
+  function leaderDrill(st, id, list, hint, get = { rl: (o) => o.dim.rl, zn: (o) => o.dim.zn }) {
     const V = S[st], rlOf = {};
-    list.forEach((o) => { if (o.dim.zn && !rlOf[o.dim.zn]) rlOf[o.dim.zn] = o.dim.rl; });
+    list.forEach((o) => { const z = get.zn(o); if (z && !rlOf[z]) rlOf[z] = get.rl(o); });
     const at = V.zn ? "outlet" : V.rl ? "zn" : V.lvl;
     const d = `data-dst="${st}" data-dtab="${id}"`;
     const btn = (k, t) => `<button type="button" ${d} data-dlvl="${k}" aria-pressed="${!V.rl && !V.zn && V.lvl === k}">${t}</button>`;
     return {
       V, at, rlOf,
-      inPath: (o) => (!V.rl || o.dim.rl === V.rl) && (!V.zn || o.dim.zn === V.zn),
+      inPath: (o) => (!V.rl || get.rl(o) === V.rl) && (!V.zn || get.zn(o) === V.zn),
       tools: `<div class="seg" role="group" aria-label="Level">${btn("rl", "Regional leaders")}${btn("zn", "Zonal leaders")}${btn("outlet", "Outlets")}</div>`,
       crumbs: V.rl || V.zn ? `<div class="drill-banner"><button type="button" ${d} data-dgo="top">${V.lvl === "zn" ? "Zonal leaders" : "Regional leaders"}</button>${V.rl ? ` › ${V.zn ? `<button type="button" ${d} data-dgo="rl">${esc(V.rl)}</button>` : `<strong>${esc(V.rl)}</strong>`}` : ""}${V.zn ? ` › <strong>${esc(V.zn)}</strong>` : ""}<span class="muted">· ${at === "zn" ? "click a zonal for its outlets" : hint}</span></div>` : "",
       pick: (x) => `${d} data-dpick="${at}" data-dkey="${esc(x.key)}" tabindex="0" title="${at === "rl" ? `See ${esc(x.name)}'s zonals` : `List ${esc(x.name)}'s outlets`}"`,
@@ -2556,16 +2556,19 @@
   }
   const cwOutletAttr = (x) => `data-cwoutlet="${esc(x.code)}" tabindex="0"`;
   // Group table used by the overview comparison and the league tables. Clicking a group lists its outlets.
-  function cwGroupTable(id, v, dim, metric, extraTools, title) {
-    const def = CWM[metric], gd = gdrill(id, dim);
-    const rows = gd ? cwGroups(v.metrics.filter((r) => (r[dim] || "Unmapped") === gd.key), "outlet") : cwGroups(v.metrics, dim);
-    const lvl = gd ? "outlet" : dim;
+  function cwGroupTable(id, v, dim, metric, extraTools, title, D) {
+    const def = CWM[metric], gd = D ? null : gdrill(id, dim);
+    const CWD = { rl: "regionalLeader", zn: "zone", outlet: "outlet" };
+    const rows = D ? cwGroups(v.metrics.filter(D.inPath), CWD[D.at]) : gd ? cwGroups(v.metrics.filter((r) => (r[dim] || "Unmapped") === gd.key), "outlet") : cwGroups(v.metrics, dim);
+    if (D && D.at === "zn") rows.forEach((x) => (x.sub = D.zsub(x.key, x.sub)));
+    const lvl = D ? CWD[D.at] : gd ? "outlet" : dim;
+    if (D) title = D.V.zn ? `Outlets of ${D.V.zn}` : D.V.rl ? `Zonals of ${D.V.rl}` : { rl: "Regional leaders", zn: "Zonal leaders", outlet: "Outlets" }[D.at];
     rows.forEach((x) => { x.metric = x[metric]; x.target = x.targets[metric]; x.variance = isNum(x.metric) && isNum(x.target) ? x.metric - x.target : null; x.base = x[def.den]; x.value = x[def.num]; });
     return mountTable(id, {
-      title: gd ? `Outlets of ${gd.key}` : title, file: `cw_${id}_${lvl}_${metric}`, stamp: S.cwv.to, banner: gBanner(id, gd),
-      desc: (n) => `${int(n)} rows. ${def.label}, weighted; lower is better. ${lvl === "outlet" ? "Click an outlet for its profile." : "Click a row to list its outlets."}`,
-      rows, key: (x) => x.key, searchText: (x) => `${x.name} ${x.sub}`, defaultSort: "metric", tools: extraTools, pageSize: 25,
-      rowAttr: (x) => (x.code ? cwOutletAttr(x) : `data-gpick="${id}" data-glevel="${esc(dim)}" data-gkey="${esc(x.key)}" tabindex="0" title="List ${esc(x.name)}'s outlets"`),
+      title: gd ? `Outlets of ${gd.key}` : title, file: D ? D.file(`cw_${metric}`) : `cw_${id}_${lvl}_${metric}`, stamp: S.cwv.to, banner: D ? D.crumbs : gBanner(id, gd),
+      desc: (n) => `${int(n)} ${D ? ({ regionalLeader: "regional leaders", zone: n === 1 ? "zonal" : "zonals", outlet: n === 1 ? "outlet" : "outlets" }[lvl]) : "rows"}. ${def.label}, weighted; lower is better. ${lvl === "outlet" ? "Click an outlet for its profile." : D && lvl === "regionalLeader" ? "Click a leader to see their zonals." : "Click a row to list its outlets."}`,
+      rows, key: (x) => x.key, searchText: (x) => `${x.name} ${x.sub}`, defaultSort: "metric", tools: D ? `${D.tools}${extraTools}` : extraTools, pageSize: 25,
+      rowAttr: (x) => (x.code ? cwOutletAttr(x) : D ? D.pick(x) : `data-gpick="${id}" data-glevel="${esc(dim)}" data-gkey="${esc(x.key)}" tabindex="0" title="List ${esc(x.name)}'s outlets"`),
       cols: [
         { k: "name", label: CW_LEVELS[lvl], fmt: (x) => `<span class="cell-primary">${esc(x.name)}</span><span class="cell-secondary">${esc(x.sub)}</span>`, csv: (x) => x.name, val: (x) => x.name },
         { k: "outlets", label: "Outlets", num: 1, fmt: (x) => int(x.outlets) },
@@ -2587,10 +2590,10 @@
     const counts = { good: 0, near: 0, bad: 0, neutral: 0 };
     v.metrics.forEach((r) => { const k = r.statuses[f.statusMetric].key; counts[k === "info" ? "good" : k]++; });
     const tot = Math.max(1, counts.good + counts.near + counts.bad + counts.neutral), a = (counts.good / tot) * 100, b = a + (counts.near / tot) * 100, c = b + (counts.bad / tot) * 100;
-    const donut = `<section class="panel"><div class="panel-head"><div><h2>Target position</h2><p>Outlets within, at and above target.</p></div><div class="panel-tools">${cwSel("statusMetric", CW_METRIC_OPTS, "Status metric")}</div></div>
+    const donut = `<section class="panel cw-short"><div class="panel-head"><div><h2>Target position</h2><p>Outlets within, at and above target.</p></div><div class="panel-tools">${cwSel("statusMetric", CW_METRIC_OPTS, "Status metric")}</div></div>
       <div class="panel-body cw-donut"><div class="donut" style="background:conic-gradient(var(--good) 0 ${a}%, var(--warn) ${a}% ${b}%, var(--bad) ${b}% ${c}%, var(--surface-3) ${c}% 100%)"><div class="donut-center"><strong>${int(counts.good + counts.near + counts.bad)}</strong><span>comparable</span></div></div>
       <div class="cw-legend"><div><strong class="up">${int(counts.good)}</strong><span>Within</span></div><div><strong style="color:var(--warn)">${int(counts.near)}</strong><span>At target</span></div><div><strong class="down">${int(counts.bad)}</strong><span>Above</span></div><div><strong>${int(counts.neutral)}</strong><span>No target</span></div></div></div></section>`;
-    const trend = `<section class="panel"><div class="panel-head"><div><h2>Rate trend</h2><p id="cwTrendSub"></p></div><div class="panel-tools">${cwSel("basis", [["daily", "Daily"], ["rolling7", "7-day rolling"], ["cumulative", "Period to date"]], "Basis")}</div></div>
+    const trend = `<section class="panel cw-short"><div class="panel-head"><div><h2>Rate trend</h2><p id="cwTrendSub"></p></div><div class="panel-tools">${cwSel("basis", [["daily", "Daily"], ["rolling7", "7-day rolling"], ["cumulative", "Period to date"]], "Basis")}</div></div>
       <div class="panel-body"><div class="chart-legend"><span><i class="swatch" style="background:var(--series-1)"></i>Consumable %</span><span><i class="swatch" style="background:var(--series-2)"></i>Wastage on PNP %</span><span><i class="swatch dash"></i>Targets</span>${v.prior ? '<span><i class="swatch dash"></i>Prior period (dashed, thin)</span>' : ""}</div>
       <div class="chart" id="cwTrend"></div><p class="note" id="cwTrendNote" hidden></p></div></section>`;
     let movers = "";
@@ -2600,7 +2603,8 @@
       movers = `<section class="panel"><div class="panel-head"><div><h2>Biggest movers</h2><p>${esc(CWM[k].label)} against ${fdate(v.prior.from)} to ${fdate(v.prior.to)}.</p></div><div class="panel-tools">${cwSel("moversMetric", CW_METRIC_OPTS, "Movers metric")}</div></div>
         <div class="panel-body grid-h"><div><h3 class="cw-h3">Worsened</h3>${list([...moved].sort((x, y) => y.ch - x.ch).slice(0, 6), "down")}</div><div><h3 class="cw-h3">Improved</h3>${list([...moved].sort((x, y) => x.ch - y.ch).slice(0, 6), "up")}</div></div></section>`;
     }
-    const rank = cwGroupTable("cw-rank", v, f.rankDim, f.rankMetric, `${cwSel("rankDim", [["zone", "Zonal"], ["regionalLeader", "Regional leader"], ["division", "Division"], ["district", "District"], ["outlet", "Outlet"]], "Level")}${cwSel("rankMetric", CW_METRIC_OPTS, "Metric")}`, "Hierarchy comparison");
+    const HD = leaderDrill("cwh", "cw-rank", v.metrics, "click an outlet for its profile", { rl: (r) => r.regionalLeader || "Unmapped", zn: (r) => r.zone || "Unmapped" });
+    const rank = cwGroupTable("cw-rank", v, null, f.rankMetric, cwSel("rankMetric", CW_METRIC_OPTS, "Metric"), "Hierarchy comparison", HD);
     AFTER.push(() => cwTrend(v));
     const defs = S.cw.metricDefinitions || {};
     return `${cwBar(v)}${cwKpis(v)}<div class="grid-2">${trend}${donut}</div>${rank}${movers}
@@ -2627,7 +2631,7 @@
     if (!host) return;
     if (!v.daily.length || !v.summary.sales) { host.innerHTML = '<p class="net-empty">No daily data for the selected scope.</p>'; return; }
     const mode = S.cwv.basis, W = Math.round(Math.max(300, Math.min(1200, host.clientWidth || 800))), narrow = W < 520;
-    const H = Math.round(Math.max(200, Math.min(320, W * (narrow ? 0.62 : 0.34)))), m = { t: 14, r: narrow ? 12 : 20, b: 32, l: narrow ? 44 : 54 };
+    const H = Math.round(Math.max(152, Math.min(220, W * (narrow ? 0.45 : 0.2)))), m = { t: 10, r: narrow ? 12 : 20, b: 28, l: narrow ? 44 : 54 };
     const pw = W - m.l - m.r, ph = H - m.t - m.b;
     const ser = [["consumableRate", "--series-1"], ["wastagePnpRate", "--series-2"]];
     const cur = cwSmooth(v.daily, mode), pri = v.prior ? cwSmooth(v.prior.daily, mode) : [];
@@ -2635,7 +2639,7 @@
     const max = Math.max(0.001, ...vals) * 1.18, n = Math.max(cur.length, pri.length);
     const X = (i) => m.l + (n === 1 ? pw / 2 : (i / (n - 1)) * pw), Y = (x) => m.t + ph - (Math.max(0, x || 0) / max) * ph;
     const path = (rows, k) => rows.map((x, i) => (isNum(x[k]) ? [X(i), Y(x[k])] : null)).filter(Boolean).map(([x, y], i) => `${i ? "L" : "M"}${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
-    const ticks = Math.max(2, Math.min(4, Math.floor(ph / 28)));
+    const ticks = Math.max(2, Math.min(4, Math.floor(ph / 26)));
     let svg = "";
     for (let i = 0; i <= ticks; i++) { const val = (max / ticks) * i, y = Y(val); svg += `<line x1="${m.l}" x2="${W - m.r}" y1="${y}" y2="${y}" style="stroke:var(--grid)"/><text x="${m.l - 8}" y="${y + 3.5}" text-anchor="end" class="cw-axis">${pct(val, 1)}</text>`; }
     const step = Math.max(1, Math.ceil(cur.length / (narrow ? 4 : 9)));
@@ -3493,7 +3497,7 @@
     try { localStorage.setItem("opsdash-theme", t); } catch (e) {}
     if (NET_PAGES.has(S.page)) render(); // charts resolve colour tokens when drawn
   });
-  $("#resetBtn").addEventListener("click", () => { DIMS.concat(NET_DIMS).forEach(([k]) => S.filters[k].clear()); S.bands.clear(); S.on.drill = null; S.lossPick = null; S.gdrill = {}; S.ov = { ...S.ov, rl: null, zn: null }; S.lv = { ...S.lv, rl: null, zn: null }; changed(); });
+  $("#resetBtn").addEventListener("click", () => { DIMS.concat(NET_DIMS).forEach(([k]) => S.filters[k].clear()); S.bands.clear(); S.on.drill = null; S.lossPick = null; S.gdrill = {}; S.ov = { ...S.ov, rl: null, zn: null }; S.lv = { ...S.lv, rl: null, zn: null }; S.cwh = { ...S.cwh, rl: null, zn: null }; changed(); });
   applyRail();
   $("#railBtn").addEventListener("click", () => { UI.railHidden = !UI.railHidden; saveUI(); applyRail(); });
   $("#menuBtn").addEventListener("click", () => { $("#rail").classList.add("open"); $("#scrim").hidden = false; });
