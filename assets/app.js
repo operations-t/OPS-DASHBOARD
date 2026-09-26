@@ -772,7 +772,8 @@
       const got = heads.map((h) => h.metrics.find((x) => x.metric === m.metric)).filter(Boolean);
       if (!got.length) return null;
       const ach = got.reduce((a, x) => a + x.ach, 0) / got.length;
-      return { ...m, ach, pts: ach * m.w, t: null, a: null, avg: true, n: got.length };
+      const av = got.map((x) => x.a).filter(isNum);
+      return { ...m, ach, pts: ach * m.w, t: null, a: null, aAvg: av.length ? av.reduce((a, v) => a + v, 0) / av.length : null, avg: true, n: got.length };
     }).filter(Boolean);
     const cats = {};
     ms.forEach((m) => { const c = cats[m.cat] || (cats[m.cat] = { pts: 0, w: 0 }); c.pts += m.pts; c.w += m.w; });
@@ -843,11 +844,19 @@
   function kpiMatrix(V, lvl, prev) {
     const ms = V.metrics, rho = S.kl === "rho";
     const cell = (h, m) => h.metrics.find((x) => x.metric === m.metric);
-    const td = (c, m) => `<td class="${kCell(c?.ach)}" title="${esc(m.metric)}${c?.avg ? `: average of ${c.n}` : `: target ${kfmt(m.metric, c?.t)}, actual ${kfmt(m.metric, c?.a)}`}">${isNum(c?.ach) ? Math.round(c.ach * 100) : "—"}</td>`;
-    NCSV.kmatrix = () => [`kpi_matrix_${S.kl}_${V.P.k}`, [rho ? "RHO" : "Zonal", "Rank", "Score %", ...ms.map((m) => m.metric + " %")], V.heads.map((h) => [h.head, h.rank, pcsv(h.score), ...ms.map((m) => pcsv(cell(h, m)?.ach))]), V.P.k];
+    const unit = (m) => (/\(in cr\)/i.test(m.metric) ? "Cr" : /%|growth|churn|skill|assessment|audit/i.test(m.metric) ? "%" : "");
+    const num = (m, v) => (!isNum(v) ? "—" : unit(m) === "Cr" ? v.toFixed(2) : unit(m) === "%" ? (v * 100).toFixed(Math.abs(v) < 0.01 ? 3 : Math.abs(v) < 0.1 ? 2 : 1) : Number.isInteger(v) ? String(v) : v.toFixed(2));
+    const td = (c, m) => {
+      const v = c?.avg ? c.aAvg : c?.a;
+      const tip = !c ? "" : c.avg ? `average actual of ${c.n} · ${pct(c.ach, 1)} average achievement` : `actual ${kfmt(m.metric, c.a)} · target ${kfmt(m.metric, c.t)} · ${pct(c.ach, 1)} achieved`;
+      return `<td class="${kCell(c?.ach)}" title="${esc(m.metric)}: ${tip}">${num(m, v)}</td>`;
+    };
+    const raw = (m, v) => (!isNum(v) ? "" : unit(m) === "%" ? (v * 100).toFixed(4) : String(v));
+    NCSV.kmatrix = () => [`kpi_matrix_${S.kl}_${V.P.k}`, [rho ? "RHO" : "Zonal", "Rank", "Score %", ...ms.flatMap((m) => [`${m.metric} actual${unit(m) ? ` (${unit(m)})` : ""}`, `${m.metric} target${unit(m) ? ` (${unit(m)})` : ""}`, `${m.metric} achievement %`])],
+      V.heads.map((h) => [h.head, h.rank, pcsv(h.score), ...ms.flatMap((m) => { const c = cell(h, m); return [raw(m, c?.a), raw(m, c?.t), pcsv(c?.ach)]; })]), V.P.k];
     const refRow = V.ref ? `<tr class="k-ref"><td>${esc(V.refName)}${V.ref.avg ? ' <small class="cell-secondary">average</small>' : ""}</td><td></td><td class="num"><strong>${pct(V.ref.score, 1)}</strong></td>${ms.map((m) => td(cell(V.ref, m), m)).join("")}</tr>` : "";
-    return `<section class="panel k-mat"><div class="panel-head"><div><h2>KPI heat-matrix, ${esc(V.P.label)}${S.krho ? ` · ${esc(S.krho)}` : ""}</h2><p>Achievement % on every KPI (capped at 100). Green 90+, amber 70–89, red under 70. ${rho ? "Click a row for that RHO's zonals, " : ""}click a name for the KPI breakdown, or a KPI heading to rank everyone on it.</p></div><div class="panel-tools">${kBackBtns()}${csvBtn("kmatrix")}</div></div>
-      <div class="table-wrap" style="max-height:640px"><table><thead><tr><th>${rho ? "RHO" : "Zonal"}</th><th class="num">Rank</th><th class="num">Score</th>${ms.map((m) => `<th class="k-mh" data-kmetric="${esc(m.metric)}" tabindex="0" title="${esc(m.metric)} · weight ${int(m.w)}${m.dir.startsWith("lower") ? " · lower is better" : ""}">${esc(kShort(m.metric))}<small>${int(m.w)}</small></th>`).join("")}</tr></thead><tbody>
+    return `<section class="panel k-mat"><div class="panel-head"><div><h2>KPI heat-matrix, ${esc(V.P.label)}${S.krho ? ` · ${esc(S.krho)}` : ""}</h2><p>Achieved number on every KPI, coloured by achievement against each head's own target: green 90%+, amber 70–89%, red under 70%. Hover a cell for its target. ${rho ? "Click a row for that RHO's zonals, " : ""}click a name for the KPI breakdown, or a KPI heading to rank everyone on it.</p></div><div class="panel-tools">${kBackBtns()}${csvBtn("kmatrix")}</div></div>
+      <div class="table-wrap" style="max-height:640px"><table><thead><tr><th>${rho ? "RHO" : "Zonal"}</th><th class="num">Rank</th><th class="num">Score</th>${ms.map((m) => `<th class="k-mh" data-kmetric="${esc(m.metric)}" tabindex="0" title="${esc(m.metric)} · weight ${int(m.w)}${m.dir.startsWith("lower") ? " · lower is better" : ""}">${esc(kShort(m.metric))}<small>${unit(m) ? `${unit(m)} · ` : ""}w${int(m.w)}</small></th>`).join("")}</tr></thead><tbody>
       ${refRow}${V.heads.map((h) => `<tr${rho ? ` data-kdrill="${esc(h.head)}" tabindex="0" class="k-click"` : ""}><td><span class="k-name" data-khead="${esc(h.head)}" tabindex="0" role="button">${esc(h.head)}</span>${rho ? "" : `<small class="cell-secondary">RHO ${esc(V.zr[h.head] || "—")}</small>`}</td><td class="num">${int(h.rank)} ${kMove(prev, h)}</td><td class="num"><strong>${pct(h.score, 1)}</strong></td>${ms.map((m) => td(cell(h, m), m)).join("")}</tr>`).join("")}
       </tbody></table></div></section>`;
   }
@@ -975,7 +984,7 @@
           ...cats.map((c, i) => ({ k: `c${i}`, label: catShort(c), num: 1, fmt: (x) => (x.cats[c] ? `<span class="k-pill ${kCell(x[`c${i}`])}">${pct(x[`c${i}`], 1)}</span><span class="cell-secondary">${x.cats[c].pts.toFixed(1)} of ${int(x.cats[c].w)}</span>` : "—"), csv: (x) => pcsv(x[`c${i}`]) })),
           { k: "leak", label: "Biggest loss", fmt: (x) => (x.leak ? `<span class="cell-primary">${esc(kShort(x.leak.metric))}</span><span class="cell-secondary">−${x.leak.lost.toFixed(2)} pts</span>` : "—"), csv: (x) => x.leak?.metric || "", val: (x) => x.leak?.lost }],
       });
-      body = `<div class="k-two">${kpiScorecard(V, lvlP)}${kpiCards(V, lvlP)}</div>${kpiMatrix(V, lvlP, prev)}${kpiTrend(V)}${table}`;
+      body = `<div class="k-two">${kpiScorecard(V, lvlP)}${kpiCards(V, lvlP)}</div>${kpiTrend(V)}${table}${kpiMatrix(V, lvlP, prev)}`;
     }
     if (S.kfocus) { const f = S.kfocus; S.kfocus = null; AFTER.push(() => $(f)?.scrollIntoView({ block: "start" })); }
     AFTER.push(() => { const t = $(".topbar"); if (t) document.documentElement.style.setProperty("--k-top", t.offsetHeight + "px"); });
