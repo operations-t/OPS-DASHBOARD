@@ -590,6 +590,7 @@
       tr.onclick = go; tr.onkeydown = (e) => { if (e.key === "Enter") go(); };
     });
     $$("[data-gclear]", root).forEach((b) => (b.onclick = () => { delete S.gdrill[b.dataset.gclear]; render(); }));
+    $$("[data-lreason]", root).forEach((b) => (b.onclick = () => openLossReason(b.dataset.lreason, b.dataset.lrl)));
     // Leader tables (leaderDrill): level switch, drill down a level, breadcrumb back.
     const dGo = (n) => { const id = n.dataset.dtab; if (S.tables[id]) { S.tables[id].page = 1; S.tables[id].q = ""; } render(); requestAnimationFrame(() => $("#t-" + id)?.scrollIntoView({ block: "start" })); };
     $$("[data-dlvl]", root).forEach((b) => (b.onclick = () => { S[b.dataset.dst] = { lvl: b.dataset.dlvl, rl: null, zn: null }; dGo(b); }));
@@ -1123,6 +1124,64 @@
       context.outlet = null;
     }
   }
+  // ---- primary reason of loss
+  // Each loss-making outlet is set against the median profitable outlet of its format. Every reason gets a taka gap and the
+  // biggest gap is the primary reason. Fixed costs (salary, rent, other opex) are judged against the sales the outlet should
+  // make at peer sales per square foot, so low sales count as "Sales" rather than inflating every cost ratio.
+  const LREASONS = ["Sales", "GP%", "Inventory gap", "Salary", "Rent", "Other income", "Outlet OPEX"];
+  const lmed = (v) => { v = v.filter(isNum).sort((a, b) => a - b); return v.length ? (v.length % 2 ? v[(v.length - 1) / 2] : (v[v.length / 2 - 1] + v[v.length / 2]) / 2) : null; };
+  // Cost lines for the period; year to date only when every month has a breakdown.
+  function lossDetail(code) {
+    const P = S.data.pnl;
+    if (S.pm === "ytd" && !P.months.every((m) => Object.keys(P.detail?.[m] || {}).length)) return null;
+    return detailFor(code);
+  }
+  function lossParts(o) {
+    const det = lossDetail(o.c);
+    if (!det) return null;
+    const L = S.data.pnl.lines, pick = (re) => L.reduce((t, l, i) => t + (re.test(l) ? det[i] || 0 : 0), 0);
+    const rent = pick(/^rent$/i), sal = pick(/salary/i), inv = pick(/stock\s+write\s*off|stock provision/i);
+    return { rent, sal, inv, opx: (o.ox || 0) - rent - sal - inv };
+  }
+  const lossPeerCache = {};
+  function lossPeers(fmt) {
+    const key = S.pm + "|" + S.pbasis + "|" + fmt;
+    if (lossPeerCache[key]) return lossPeerCache[key];
+    const after = S.pbasis === "after";
+    const every = pnlList().filter((o) => o.s >= 1 && (!fmt || o.dim.fmt === fmt)), list = every.filter((o) => (after ? o.p : o.g) >= 0);
+    const r = (f) => lmed(list.map((o) => { const v = f(o); return isNum(v) ? v / o.s : null; }));
+    const parts = list.map((o) => [o, lossParts(o)]).filter(([, x]) => x), pr = (k) => lmed(parts.map(([o, x]) => x[k] / o.s));
+    return (lossPeerCache[key] = { n: list.length, gp: r((o) => o.gp), oi: r((o) => o.oi), ox: r((o) => o.ox), fin: r((o) => o.ofc || 0), rent: pr("rent"), sal: pr("sal"), inv: pr("inv"), opx: pr("opx"),
+      // sales productivity is set against a typical outlet of the format (all trading outlets), not only profitable ones
+      spsf: lmed(every.map((o) => (o.sft > 0 ? o.s / o.sft : null))), sales: lmed(every.map((o) => o.s)) });
+  }
+  function lossReason(o) {
+    const fmt = o.dim.fmt !== "Not in outlet master" ? o.dim.fmt : null, pe = lossPeers(fmt), x = lossParts(o), s = o.s;
+    const fin = S.pbasis === "after" ? o.ofc || 0 : 0, finPeer = fin ? pe.fin || 0 : 0;
+    const exp = o.sft > 0 && isNum(pe.spsf) ? pe.spsf * o.sft : pe.sales || s;
+    const base = Math.max(s, exp);
+    const cm = (pe.gp || 0) + (pe.oi || 0) - (x ? pe.inv || 0 : 0);
+    const g = { Sales: exp > s ? (exp - s) * cm : 0, "GP%": isNum(pe.gp) ? pe.gp * s - (o.gp || 0) : 0, "Other income": isNum(pe.oi) ? pe.oi * s - (o.oi || 0) : 0 };
+    if (x) {
+      g["Inventory gap"] = x.inv - (pe.inv || 0) * s;
+      g.Salary = x.sal - (pe.sal || 0) * base;
+      g.Rent = x.rent - (pe.rent || 0) * base;
+      g["Outlet OPEX"] = x.opx + fin - ((pe.opx || 0) + finPeer) * base;
+    } else g["Outlet OPEX"] = (o.ox || 0) + fin - ((pe.ox || 0) + finPeer) * base;
+    const top = Object.entries(g).sort((a, b) => b[1] - a[1])[0];
+    return { reason: top[0], gap: top[1], gaps: g, exp, split: !!x, peers: pe.n, fmt };
+  }
+  function openLossReason(reason, rl) {
+    const rows = inView().map((o) => ({ o, ...pnlCalc(o) })).filter((x) => x.loss && (!rl || x.o.dim.rl === rl)).map((x) => ({ ...x, why: lossReason(x.o) })).filter((x) => !reason || x.why.reason === reason).sort((a, b) => a.pl - b.pl);
+    S.lastFocus = document.activeElement; S.ageDrill = null;
+    $("#drawerTitle").textContent = `${reason || "All reasons"}${rl ? `, ${rl}` : ""}`;
+    $("#drawerBody").innerHTML = `<div class="stat-grid three"><div class="stat"><small>Loss-making outlets</small><strong>${int(rows.length)}</strong></div><div class="stat"><small>Total loss</small><strong class="down">${bdt(rows.reduce((t, x) => t + x.pl, 0))}</strong></div><div class="stat"><small>Primary reason</small><strong style="font-size:18px">${esc(reason || "Any")}</strong></div></div>
+      <div class="table-wrap" style="max-height:560px"><table class="compact"><thead><tr><th>Outlet</th><th class="num">Sales</th><th class="num">P/L</th><th>Primary reason</th><th class="num">Gap vs peers</th></tr></thead><tbody>
+      ${rows.map((x) => `<tr data-pnl="${esc(x.o.c)}" tabindex="0" class="k-click"><td><span class="cell-primary">${esc(x.o.nm)}</span><span class="cell-secondary">${esc(x.o.c)}, ${esc(x.o.dim.rl)}, ${esc(x.o.dim.zn)}</span></td><td class="num">${bdt(x.o.s)}</td><td class="num"><strong class="down">${bdt(x.pl)}</strong></td><td>${esc(x.why.reason)}</td><td class="num">${bdt(x.why.gap)}</td></tr>`).join("") || '<tr><td colspan="5" class="empty">No outlets.</td></tr>'}</tbody></table></div>
+      <p class="muted" style="margin:0;font-size:12px">Gap vs peers is how many taka this reason costs the outlet against the median profitable outlet of its format. Click an outlet for its full breakdown.</p>`;
+    wireDyn($("#drawerBody"));
+    showDrawer();
+  }
   function pageLoss() {
     const P = S.data.pnl;
     if (!P) return `<p class="empty">No outlet P&L file is loaded yet. Add one to the Performance folder.</p>`;
@@ -1135,6 +1194,7 @@
     const totLoss = sum(losses, "pl"), net = sum(all, "pl");
     const newL = losses.filter((x) => x.st === "new").length, rec = all.filter((x) => !x.loss && isNum(x.pl0) && x.pl0 < 0).length;
     const young = losses.filter((x) => x.age != null && x.age < 12).length;
+    losses.forEach((x) => (x.why = lossReason(x.o)));
     const basisLbl = S.pbasis === "after" ? "after financing cost" : "before financing cost";
     const periodName = ytd ? `year to date (${P.months.length} months)` : fmonth(S.pm);
     const monthSel = `<select class="sel" data-sel="pm" aria-label="Month">${P.months.map((m) => `<option value="${m}" ${m === S.pm ? "selected" : ""}>${fmonth(m)}</option>`).join("")}${P.months.length > 1 ? `<option value="ytd" ${ytd ? "selected" : ""}>Year to date, ${fmonth(P.months[0])} to ${fmonth(P.months[P.months.length - 1])}</option>` : ""}</select>`;
@@ -1145,10 +1205,34 @@
       const inB = all.filter((x) => ageBand(x.age) === b), lB = inB.filter((x) => x.loss);
       return { b, n: inB.length, l: lB.length, loss: sum(lB, "pl") };
     }).filter((x) => x.n);
-    const agePanel = `<section class="panel"><div class="panel-head"><div><h2>Loss-making outlets by age</h2><p>New outlets usually lose money while they build up trade. Click a number to see the matching outlets.</p></div></div>
-      <div class="table-wrap"><table><thead><tr><th>Outlet age</th><th class="num">Outlets</th><th class="num">Loss-making</th><th class="num">Share</th><th class="num">Total loss</th></tr></thead><tbody>
+    const agePanel = `<section class="panel"><div class="panel-head"><div><h2>Loss-making outlets by age</h2><p>New outlets usually lose money while they build up trade. Click a number for the outlets.</p></div></div>
+      <div class="table-wrap"><table class="compact lr-age"><thead><tr><th>Outlet age</th><th class="num">Outlets</th><th class="num">Loss-making</th><th class="num">Share</th><th class="num">Total loss</th></tr></thead><tbody>
       ${bands.map((x) => `<tr><td class="cell-primary">${esc(x.b)}</td><td class="num">${ageDrillLink(x.b, "all", int(x.n), "View all trading outlets")}</td><td class="num">${ageDrillLink(x.b, "loss", int(x.l), "View loss-making outlets")}</td><td class="num">${ageDrillLink(x.b, "loss", pct(x.l / x.n), "View outlets behind the loss-making share")}</td><td class="num down">${ageDrillLink(x.b, "loss", bdt(x.loss), "View outlets contributing to total loss", "down")}</td></tr>`).join("")}
       </tbody></table></div></section>`;
+
+    // primary reason of loss: by regional leader, and in total
+    const zero = () => Object.fromEntries(LREASONS.map((t) => [t, 0]));
+    const byRl = new Map(), byR = Object.fromEntries(LREASONS.map((t) => [t, { n: 0, loss: 0 }]));
+    losses.forEach((x) => {
+      const k = x.o.dim.rl, r = byRl.get(k) || { k, n: 0, loss: 0, c: zero() };
+      r.n++; r.loss += x.pl; r.c[x.why.reason]++; byRl.set(k, r);
+      byR[x.why.reason].n++; byR[x.why.reason].loss += x.pl;
+    });
+    const rlRows = [...byRl.values()].sort((a, b) => b.n - a.n || a.loss - b.loss);
+    const lnk = (v, reason, rl, cls = "") => (v ? `<button type="button" class="age-drill-link ${cls}" data-lreason="${esc(reason)}" data-lrl="${esc(rl)}" title="${esc(`${reason || "All loss-making outlets"}${rl ? `, ${rl}` : ""}`)}">${v}</button>` : '<span class="muted">0</span>');
+    const noSplit = losses.length && !losses[0].why.split;
+    const method = `Each loss-making outlet is compared with the median profitable outlet of its format; its primary reason is the line with the biggest taka gap. Low sales are judged on sales per square foot against a typical outlet of the same format.${noSplit ? " This period has no cost-line breakdown, so Inventory gap, Salary and Rent fall under Outlet OPEX." : ""}`;
+    NCSV.lreason = () => [`loss_primary_reason_${S.pm}_${S.pbasis}`, ["Regional leader", "Loss outlets", "Loss (Tk)", ...LREASONS], rlRows.map((r) => [r.k, r.n, Math.round(r.loss), ...LREASONS.map((t) => r.c[t])]).concat([["Total", losses.length, Math.round(totLoss), ...LREASONS.map((t) => byR[t].n)]]), S.pm];
+    const leadPanel = `<section class="panel lr-lead"><div class="panel-head"><div><h2>Primary reason of loss by regional leader, ${esc(periodName)}</h2><p>${method} Click a number for the outlets.</p></div><div class="panel-tools">${csvBtn("lreason")}</div></div>
+      <div class="table-wrap" style="max-height:none"><table class="lr-table"><thead><tr><th>Regional leader</th><th class="num">Loss outlets</th><th class="num">Loss (Tk)</th>${LREASONS.map((t) => `<th class="num">${esc(t)}</th>`).join("")}</tr></thead><tbody>
+      ${rlRows.map((r) => `<tr><td class="cell-primary">${esc(r.k)}</td><td class="num">${lnk(int(r.n), "", r.k)}</td><td class="num down">${bdt(r.loss)}</td>${LREASONS.map((t) => `<td class="num">${lnk(r.c[t] ? int(r.c[t]) : 0, t, r.k)}</td>`).join("")}</tr>`).join("")}
+      </tbody><tfoot><tr class="lr-total"><td>Total</td><td class="num">${lnk(int(losses.length), "", "")}</td><td class="num down">${bdt(totLoss)}</td>${LREASONS.map((t) => `<td class="num">${lnk(byR[t].n ? int(byR[t].n) : 0, t, "")}</td>`).join("")}</tr></tfoot></table></div></section>`;
+    NCSV.lreasontot = () => [`loss_by_primary_reason_${S.pm}_${S.pbasis}`, ["Primary reason", "Outlets", "Loss (Tk)"], LREASONS.map((t) => [t, byR[t].n, Math.round(byR[t].loss)]), S.pm];
+    const maxL = Math.max(...LREASONS.map((t) => -byR[t].loss), 1);
+    const reasonPanel = `<section class="panel"><div class="panel-head"><div><h2>Loss by primary reason, ${esc(periodName)}</h2><p>Loss-making outlets and their loss, grouped by primary reason. Click a reason for the outlets.</p></div><div class="panel-tools">${csvBtn("lreasontot")}</div></div>
+      <div class="table-wrap" style="max-height:none"><table class="compact lr-rt"><thead><tr><th>Primary reason</th><th class="num">Outlets</th><th class="num">Loss (Tk)</th><th>Share of loss</th></tr></thead><tbody>
+      ${LREASONS.map((t) => `<tr><td class="cell-primary">${esc(t)}</td><td class="num">${lnk(byR[t].n ? int(byR[t].n) : 0, t, "")}</td><td class="num down">${byR[t].n ? bdt(byR[t].loss) : "—"}</td><td><div class="lr-bar"><i style="width:${(-byR[t].loss / maxL) * 100}%"></i><span>${totLoss ? pct(byR[t].loss / totLoss, 0) : "—"}</span></div></td></tr>`).join("")}
+      </tbody><tfoot><tr class="lr-total"><td>Total</td><td class="num">${lnk(int(losses.length), "", "")}</td><td class="num down">${bdt(totLoss)}</td><td></td></tr></tfoot></table></div></section>`;
 
     // by regional leader > zonal > outlet; the loss-making list below follows the drill
     const D = leaderDrill("lv", "loss-grp", all.map((x) => x.o), "click an outlet for its cost breakdown"), at = D.at, V = D.V;
@@ -1202,6 +1286,7 @@
         ...(ytd ? [{ k: "months", label: "Months", num: 1, val: (x) => x.o.months, fmt: (x) => int(x.o.months), csv: (x) => x.o.months }] : []),
         { k: "pl0", label: "P/L last month", num: 1, fmt: (x) => `<span class="${x.pl0 < 0 ? "down" : "up"}">${bdt(x.pl0)}</span>`, csv: (x) => (isNum(x.pl0) ? Math.round(x.pl0) : "") },
         { k: "st", label: "Status", val: (x) => x.st, fmt: (x) => chip(LOSS_STATUS[x.st]), csv: (x) => LOSS_STATUS[x.st].label },
+        { k: "why", label: "Primary reason", val: (x) => x.why?.reason, fmt: (x) => `<span class="cell-primary">${esc(x.why?.reason || "—")}</span><span class="cell-secondary">${isNum(x.why?.gap) ? bdt(x.why.gap) + " vs peers" : ""}</span>`, csv: (x) => x.why?.reason || "" },
         { k: "need", label: "Break-even sales", num: 1, fmt: (x) => (isNum(x.need) ? `${bdt(x.be)}<span class="cell-secondary">+${pct(x.need, 1)} needed</span>` : '<span class="muted" title="Gross margin plus other income is zero or negative">Not reachable</span>'), csv: (x) => (isNum(x.be) ? Math.round(x.be) : "") }],
     });
 
@@ -1214,7 +1299,7 @@
       ${ytd ? "" : kpi({ label: "Back to profit", value: `<span class="up">${int(rec)}</span>`, sub: "Loss-making last month", foot: "<span>Profitable this month</span>", accent: "var(--good)" })}
       </div>
       <p class="muted" style="margin:0">${int(young)} of the ${int(losses.length)} loss-making outlets opened less than a year ago.</p>
-      ${agePanel}${grp}${list}`;
+      ${leadPanel}<div class="lr-pair">${agePanel}${reasonPanel}</div>${grp}${list}`;
   }
   const peerCache = {};
   function peerMedians(fmt) {
@@ -1263,6 +1348,9 @@
         <dt>Format</dt><dd>${esc(o.dim.fmt)}</dd><dt>Size</dt><dd>${o.sft ? int(o.sft) + " sq ft" : "—"}</dd>
         <dt>Opened</dt><dd>${o.ld || o.m?.ld ? fdate(o.ld || o.m.ld) + ` (${ageTxt(x.age)})` : "—"}</dd><dt>Financing cost</dt><dd>${bdt(o.ofc)}</dd>
       </dl>
+      ${x.loss ? (() => { const w = lossReason(o), rows = Object.entries(w.gaps).sort((a, b) => b[1] - a[1]); return `<h3 style="font-size:14px">Why it loses money</h3>
+      <div class="table-wrap" style="max-height:none"><table class="compact"><thead><tr><th>Reason</th><th class="num">Gap vs peers</th></tr></thead><tbody>${rows.map(([t, v]) => `<tr${t === w.reason ? ' class="lr-top"' : ""}><td class="cell-primary">${esc(t)}${t === w.reason ? " · primary reason" : ""}</td><td class="num"><span class="${v > 0 ? "down" : "up"}">${bdt(v)}</span></td></tr>`).join("")}</tbody></table></div>
+      <p class="muted" style="margin:0;font-size:12px">Positive gaps cost this outlet money against the median of ${int(w.peers)} profitable ${w.fmt ? esc(w.fmt.toLowerCase()) + " " : ""}outlets. Salary, rent and other opex are judged at the sales it should make on its floor space${isNum(w.exp) ? ` (${bdt(w.exp)})` : ""}.${w.split ? "" : " No cost-line breakdown this period, so salary, rent and inventory gap sit in Outlet OPEX."}</p>`; })() : ""}
       <h3 style="font-size:14px">Where the money goes</h3>${costHtml}`;
     if (fromAgeList) $("[data-age-back]", $("#drawerBody")).onclick = drawAgeOutlets;
     showDrawer();

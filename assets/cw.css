@@ -202,3 +202,17 @@ tr.k-sel td{background:color-mix(in srgb,var(--info) 12%,var(--surface))!importa
 .cw-short .cw-donut .donut{width:104px;height:104px}
 .cw-short .cw-donut .donut::after{width:70px;height:70px}
 .cw-short .cw-legend strong{font-size:18px}
+
+/* Loss-making outlets: primary reason of loss */
+.lr-pair{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:stretch}
+.lr-pair>.panel{min-width:0}
+@media (max-width:1000px){.lr-pair{grid-template-columns:1fr}}
+.lr-table th,.lr-table td{white-space:nowrap}
+.lr-table thead th{background:var(--surface-2)}
+.lr-total td{font-weight:700;border-top:2px solid var(--line);background:var(--surface-2)}
+.lr-total .age-drill-link{font-weight:700}
+.lr-age th,.lr-age td,.lr-rt th,.lr-rt td{padding-top:7px;padding-bottom:7px}
+.lr-bar{display:grid;grid-template-columns:minmax(40px,1fr) 38px;gap:8px;align-items:center}
+.lr-bar i{display:block;height:8px;border-radius:999px;background:var(--bad);min-width:2px}
+.lr-bar span{font-size:11.5px;color:var(--ink-2);text-align:right;font-variant-numeric:tabular-nums}
+tr.lr-top td{background:var(--bad-soft)}
