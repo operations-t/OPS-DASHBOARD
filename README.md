@@ -1,24 +1,24 @@
 # Operations Dashboard
 
-Sales achievement and growth visibility for Shwapno operations, fed automatically from four Google Drive folders.
+Sales achievement and growth visibility for Shwapno operations, fed automatically from one mother Google Drive folder.
 
 ## How the data gets in
 
-GitHub downloads the files from the public Drive folders every hour (8 am to 11 pm Dhaka time), reads them by their content, and saves `data/data.json`. The site only reads that file. No API key is used.
+GitHub reads the public mother Drive folder every hour (8 am to 11 pm Dhaka time), recognises each file by its content, and saves `data/data.json` (plus the network, consumable and availability files below). The site only reads those files. No API key is used. Downloads are cached between runs by Drive file and last-modified time, so only new or changed files are downloaded.
 
-| Drive folder | What goes in it | Rule |
+| Kind of file | What goes in it | Rule |
 |---|---|---|
 | Till-date | Daily till-date Business Performance Report | Replace the file each day |
 | Month-end | Last month's closed Business Performance Report | Replace the file each month |
 | Performance | KPI RHO & Zonal file, Zone Distribution and Outlet-wise Profitability (P&L) | Add new files each month, keep old ones |
 
-Filenames don't matter. Every folder must stay shared as "Anyone with the link", and each folder can hold at most 50 files.
+Filenames and sub-folders don't matter: every file anywhere under the mother folder is recognised by its columns. The folder must stay shared as "Anyone with the link". A sub-folder whose name contains "Daily" or "Till" is preferred for the till-date report when two reports compete.
 
 If a file is broken or missing, the refresh is rejected and the site keeps the last good data. The Data quality page lists every problem found.
 
 ### The mother Drive folder
 
-All data now lives under one mother folder, [Operations data](https://drive.google.com/drive/folders/1Te9stxbcBsIIO8bNElPuDXXPovkk4v1l), shared as "Anyone with the link". The Outlet network, Growth & momentum and Consumable & wastage refreshes search every sub-folder of it and recognise each file by its columns, never by its name. The main sales pages still read the Daily, Month-end and Performance sub-folders by their links, so keep those three folders.
+All data now lives under one mother folder, [Operations data](https://drive.google.com/drive/folders/1Te9stxbcBsIIO8bNElPuDXXPovkk4v1l), shared as "Anyone with the link". The Outlet network, Growth & momentum and Consumable & wastage refreshes search every sub-folder of it and recognise each file by its columns, never by its name. The main sales pages read it the same way.
 
 One till-date sales file (columns **Outlet, Date, Article Division, POS NSI**) feeds both the Outlet network pages and Consumable & wastage; keep it current. If two files of the same kind exist, the one whose data runs latest wins (for Zone Distribution, the most recently modified).
 
@@ -45,8 +45,8 @@ Without a last-month workbook every last-month figure shows as —. The month-en
 
 1. Create a new repository (public for testing) and upload everything in this folder, including the `.github` folder.
 2. Settings → Actions → General → Workflow permissions: choose **Read and write permissions** and save.
-3. Settings → Pages → Build and deployment: Source **Deploy from a branch**, branch **main**, folder **/ (root)**, then save.
-4. Actions → **Refresh data** → **Run workflow**. When it finishes (about a minute), the site shows the latest Drive files.
+3. Settings → Pages → Build and deployment: Source **GitHub Actions**, then save. (Don't use "Deploy from a branch": the **Deploy dashboard** workflow publishes the site, and a branch deploy would run a second, competing deployment on every push.)
+4. Actions → **Refresh data** → **Run workflow**. When it finishes (a few minutes the first time, faster once the download cache is warm), it starts **Deploy dashboard** and the site shows the latest Drive files. Deploys only run when the data actually changed.
 
 ## Deploy on Coolify (private)
 
@@ -57,6 +57,7 @@ The same repository deploys to Coolify with the included `Dockerfile`. The conta
 3. Environment variables (optional):
    - `BASIC_AUTH_USER` and `BASIC_AUTH_PASSWORD` put a login on the whole site. Leave them empty for no login.
    - `REFRESH_MINUTES` sets how often Drive is checked (default 60).
+   - `REFRESH_FROM` and `REFRESH_TO` set the Dhaka-time hours when refreshes run (default 8 to 23); the first refresh always runs at start-up.
 4. Add your domain, then **Deploy**. The first refresh runs as soon as the container starts.
 
 On the Coolify copy, the GitHub "Refresh data" workflow isn't needed. If Coolify redeploys on every push, disable that workflow (Actions → Refresh data → ⋯ → Disable workflow) so it doesn't trigger a redeploy every hour.
@@ -69,7 +70,7 @@ Coolify: press **Restart** on the application; the refresh runs at start-up.
 ## Files
 
 - `index.html`, `assets/` — the site
-- `scripts/build_data.py` — downloads and reads the Drive files (run `python scripts/build_data.py --local <folder>` to test with local copies in `tilldate/`, `monthend/`, `performance/` subfolders)
+- `scripts/build_data.py` — downloads and reads the sales, KPI, P&L and outlet master files (run `python scripts/build_data.py --local <folder>` to test with local copies in any sub-folders)
 - `scripts/network/refresh.py` — downloads the outlet network folder and builds `data/network.json` (standard library only)
 - `scripts/av/refresh.py` — builds `data/av.json` for the Availability pages
 - `scripts/cw/refresh.py` — downloads the Consumable & Wastage Control folder (Target.txt, Sales-Till, Zone Distribution, CONSUMABLE, WASTAGE) and builds `data/cw.json`

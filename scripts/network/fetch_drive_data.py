@@ -212,6 +212,7 @@ def fetch_bytes(item: dict) -> bytes:
         key = hashlib.sha256(f"{item['id']}|{item.get('modified', '')}".encode()).hexdigest()[:24]
         cached = CACHE_DIR / key
         if cached.exists():
+            os.utime(cached)  # mark as used this run, so pruning keeps it
             return cached.read_bytes()
     body, headers = http_get(url)
     if "accounts.google.com" in headers.get("x-final-url", "") or any(m in body[:20000] for m in GOOGLE_PAGE_MARKERS):

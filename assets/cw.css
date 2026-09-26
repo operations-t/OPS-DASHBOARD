@@ -235,3 +235,14 @@ tr.lr-top td{background:var(--bad-soft)}
 .lr-row>#t-loss-grp{contain:size;display:flex;flex-direction:column;min-width:0}
 .lr-row>#t-loss-grp>.table-wrap{flex:1 1 0;min-height:0;max-height:none;overflow:auto}
 @media (max-width:1000px){.lr-row{grid-template-columns:1fr}.lr-row>#t-loss-grp{contain:none}.lr-row>#t-loss-grp>.table-wrap{flex:none;max-height:560px}}
+
+/* Audit fixes */
+/* KPI toolbar stays put on phones so it does not cover a quarter of the screen */
+@media (max-width:760px){.k-bar{position:static;box-shadow:none}}
+/* Dark theme: readable green in the KPI heat-matrix */
+:root:not([data-theme="light"]) .kc-g{background:color-mix(in srgb,var(--good) 28%,var(--surface));color:#8fe3c8}
+:root:not([data-theme="light"]) .kc-r{color:#ff9b73}
+/* Loss by regional leader at half width: compact so every column fits */
+.lr-row>#t-loss-grp table{font-size:12px}
+.lr-row>#t-loss-grp th,.lr-row>#t-loss-grp td{padding-left:7px;padding-right:7px}
+.lr-row>#t-loss-grp .cell-secondary{font-size:11px}

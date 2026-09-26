@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Ops dashboard data builder.
 
-Downloads the three public Google Drive folders (no API key), recognises every
-Excel file by its CONTENT (never by filename) and writes data/data.json.
+Lists the public mother Google Drive folder and its sub-folders (no API key),
+recognises every Excel file by its CONTENT (never by filename or folder) and
+writes data/data.json. Downloads go through the shared DRIVE_CACHE, so a file
+another refresh already fetched is not downloaded twice.
 
 Usage:
   python scripts/build_data.py                 # download from Drive, then build
-  python scripts/build_data.py --local DIR     # use DIR/tilldate, DIR/monthend, DIR/performance
+  python scripts/build_data.py --local DIR     # use the Excel files under DIR (any sub-folders)
 
 Exit code 1 = critical problem; data.json is NOT overwritten, so the live
 dashboard keeps showing the last good data.
@@ -14,11 +16,9 @@ dashboard keeps showing the last good data.
 import argparse, calendar, datetime as dt, glob, json, os, re, shutil, sys, tempfile
 from openpyxl import load_workbook
 
-FOLDERS = {
-    "tilldate": "12UEEFUoUIP_duIJGYMw5g2zjsiuphjOa",
-    "monthend": "1oRRVEZ7A6AjrsXZ-wHx7JQrDh3FoB2eb",
-    "performance": "1r09IGv8Pk0J86li4hqLD8gskj5j3SBih",
-}
+# The mother folder that holds every dashboard's data; files may sit in any sub-folder.
+MOTHER = (os.environ.get("DATA_FOLDER_ID") or "1Te9stxbcBsIIO8bNElPuDXXPovkk4v1l").strip()
+TILL_FOLDER = re.compile(r"daily|till", re.I)  # a sub-folder name that marks till-date reports (preferred, not required)
 OUT = os.environ.get("DATA_OUT") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "data.json")
 CODE_RE = re.compile(r"^[A-Z]{1,2}\d{2,4}$")
 MONTH_RE = re.compile(r"^([A-Za-z]{3})'(\d{2})$")
@@ -83,16 +83,35 @@ def pick(m, *names):
 
 # --------------------------------------------------------------------------- download
 def download(workdir):
-    import gdown
-    for key, fid in FOLDERS.items():
-        out = os.path.join(workdir, key)
-        os.makedirs(out, exist_ok=True)
+    """Fetch every Excel workbook under the mother folder into workdir/<top sub-folder>/<name>."""
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "network"))
+    import fetch_drive_data as drive  # stdlib listing + download, shares DRIVE_CACHE with the other refreshes
+    try:
+        items = drive.walk(MOTHER)
+    except Exception as e:
+        issue("error", "tilldate", f"Could not list the Drive folder ({e}). Check it is shared as 'Anyone with the link'.")
+        return
+    safe = lambda t: re.sub(r'[<>:"/\\|?*]+', "_", t).strip() or "_"
+    got = 0
+    for item in items:
+        if not drive.is_spreadsheet(item):
+            continue
+        top = item["path"].split("/")[0] if "/" in item["path"] else "Drive"
+        name = item["name"] if item["name"].lower().endswith((".xlsx", ".xlsm")) else item["name"] + ".xlsx"
+        dest = os.path.join(workdir, safe(top), safe(name))
         try:
-            res = gdown.download_folder(id=fid, output=out, quiet=True, use_cookies=False, remaining_ok=True)
-            if not res:
-                issue("error", key, "Drive folder returned no files. Check it is shared as 'Anyone with the link' and holds at most 50 files.")
-        except Exception as e:  # keep going; missing folders become issues
-            issue("error", key, f"Could not download Drive folder ({e}). Check it is shared as 'Anyone with the link'.")
+            body = drive.fetch_bytes(item)
+        except Exception as e:
+            issue("warn", item["path"], f"Could not download ({e}).")
+            continue
+        if not body.startswith(b"PK"):
+            continue
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        with open(dest, "wb") as fh:
+            fh.write(body)
+        got += 1
+    if not got:
+        issue("error", "tilldate", "No Excel files found in the Drive folder. Check it is shared as 'Anyone with the link'.")
 
 
 def excel_files(folder):
@@ -142,8 +161,7 @@ def classify(path):
         f = flat(rows)
         if "pos nsi" in f and "date" in f and ({"outlet", "outlet code"} & f):
             return None, None  # till-date sales by outlet and day: used by the other dashboards, not this build
-    issue("warn", os.path.basename(path), "Unrecognised file: no known sheet layout found. It was skipped.")
-    return None, None
+    return "unknown", None
 
 
 # --------------------------------------------------------------------------- business report
@@ -554,8 +572,9 @@ def parse_pnl(path, wb, heads):
         break
     if not detail:
         issue("warn", src, "P&L cost breakdown sheet not found; outlet cost details unavailable.")
-    loss = sum(1 for o in out if (o.get("p") or 0) < 0)
-    issue("info", src, f"P&L {month}: {len(out)} outlets, {loss} loss-making after financing cost.")
+    trading = [o for o in out if (o.get("s") or 0) >= 1]
+    loss = sum(1 for o in trading if (o.get("p") or 0) < 0)
+    issue("info", src, f"P&L {month}: {len(trading)} trading outlets ({len(out) - len(trading)} closed not counted), {loss} loss-making after financing cost.")
     return {"file": src, "month": month, "outlets": out, "lines": lines, "detail": detail}
 
 
@@ -614,12 +633,15 @@ def month_end(d):
 
 def build(root):
     found = {"business": [], "kpi": [], "master": [], "pnl": []}
-    for folder in FOLDERS:
+    folders = sorted(f for f in os.listdir(root) if os.path.isdir(os.path.join(root, f))) or ["."]
+    for folder in folders:
         files = excel_files(os.path.join(root, folder))
-        if not files:
-            issue("warn", folder, "Folder is empty or could not be read.")
+        unknown = []
         for p in files:
             kind, payload = classify(p)
+            if kind == "unknown":
+                unknown.append(p)
+                continue
             if not kind:
                 continue
             wb, heads = payload
@@ -629,9 +651,17 @@ def build(root):
                 parsed["folder"] = folder
                 found[kind].append(parsed)
                 print(f"recognised {kind}: {os.path.basename(p)} ({folder})")
+        # The mother folder also holds other dashboards' files. Only flag an unknown workbook when it sits
+        # next to files this build uses, where it was most likely meant for these pages.
+        used_here = any(f.get("folder") == folder for v in found.values() for f in v)
+        for p in unknown:
+            if used_here:
+                issue("warn", os.path.basename(p), "Unrecognised file: no known sheet layout found. It was skipped.")
+            else:
+                print(f"skipped (not a sales, KPI, P&L or outlet master layout): {os.path.basename(p)} ({folder})")
 
     biz = found["business"]
-    td_pool = [b for b in biz if b["folder"] == "tilldate"] or biz
+    td_pool = [b for b in biz if TILL_FOLDER.search(b["folder"])] or biz
     if not td_pool:
         issue("error", "tilldate", "No till-date business report found.")
         return None
@@ -679,7 +709,7 @@ def build(root):
             if rep:
                 miss = sorted(o["c"] for o in rep["outlets"] if o["c"] not in mcodes and o.get("s"))
                 if miss:
-                    issue("info", rep["file"], f"{name}: {len(miss)} outlets with sales are not in the outlet master (shown as Unmapped): {', '.join(miss[:12])}{'…' if len(miss) > 12 else ''}")
+                    issue("info", rep["file"], f"{name}: {len(miss)} outlets with sales are not in the outlet master (shown as 'Not in outlet master'): {', '.join(miss[:12])}{'…' if len(miss) > 12 else ''}")
 
     def rep_out(b):
         if not b:

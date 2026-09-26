@@ -38,7 +38,7 @@
     { k: "b100", label: "100% or more", cls: "good", min: 1 },
     { k: "b90", label: "90 to 99%", cls: "warn", min: 0.9 },
     { k: "b80", label: "80 to 89%", cls: "bad", min: 0.8 },
-    { k: "b0", label: "Below 80%", cls: "bad", min: -Infinity },
+    { k: "b0", label: "Below 80%", cls: "crit", min: -Infinity },
   ];
 
   const S = { data: null, page: "overview", period: "tilldate", filters: {}, openDim: null, tables: {}, level: "rl", bands: new Set(), lastFocus: null,
@@ -134,9 +134,12 @@
   }
 
   function agg(list) {
-    const a = { n: list.length, t: 0, a: 0, tn: 0, s: 0, sy: 0, sm: 0, f: 0, fy: 0, fm: 0, gv: 0, gvy: 0, gvm: 0, ssS: 0, ssY: 0, ssn: 0 };
+    // a = achieved by outlets that have a target, so achievement is always achieved / target on the same outlets.
+    // Sales of outlets without a target are kept apart in aNo (count nNo); aAll is everything.
+    const a = { n: list.length, t: 0, a: 0, aAll: 0, aNo: 0, nNo: 0, tn: 0, s: 0, sy: 0, sm: 0, f: 0, fy: 0, fm: 0, gv: 0, gvy: 0, gvm: 0, ssS: 0, ssY: 0, ssn: 0 };
     for (const o of list) {
-      a.t += o.t || 0; a.a += o.a || 0; if (o.t > 0) a.tn++;
+      a.t += o.t || 0; a.aAll += o.a || 0;
+      if (o.t > 0) { a.tn++; a.a += o.a || 0; } else if (o.a) { a.aNo += o.a; a.nNo++; }
       a.s += o.s || 0; a.sy += o.sy || 0; a.sm += o.sm || 0;
       a.f += o.f || 0; a.fy += o.fy || 0; a.fm += o.fm || 0;
       a.gv += o.gv || 0; a.gvy += o.gvy || 0; a.gvm += o.gvm || 0;
@@ -325,17 +328,19 @@
       const opts = [["tilldate", d.tilldate && `Till ${fdate(d.tilldate.date, true)}`], ["monthend", d.monthend && `Last month, ${fmonth(d.monthend.date)}`]].filter((o) => o[1]);
       $("#periodSeg").innerHTML = opts.map(([k, t]) => `<button aria-pressed="${S.period === k}" data-period="${k}">${esc(t)}</button>`).join("");
       $$("#periodSeg button").forEach((b) => b.addEventListener("click", () => { S.period = b.dataset.period; changed(); }));
-      const g = new Date(d.generated);
-      $("#fresh").textContent = "Data updated " + g.toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Dhaka" }).replace("Sept", "Sep");
+      const when = (t) => new Date(t).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Dhaka" }).replace("Sept", "Sep");
+      const fresh = (upTo, t) => { $("#fresh").textContent = `${upTo ? upTo + " · " : ""}updated ${when(t)}`; $("#fresh").title = "When the data was last refreshed from Google Drive"; };
+      const r0 = rep();
+      fresh(S.page === "performance" && d.kpi?.months?.length ? `KPI ${fmonth(d.kpi.months[d.kpi.months.length - 1])}` : S.page === "loss" && d.pnl ? `P&L ${fmonth(d.pnl.months[d.pnl.months.length - 1])}` : r0 ? `Data to ${fdate(r0.date, true)}` : "", d.generated);
       if (AV_PAGES.has(S.page)) {
         const a = S.av;
-        if (a) $("#fresh").textContent = "Data updated " + new Date(a.generatedAt).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Dhaka" }).replace("Sept", "Sep");
+        if (a) { const st = (a.files || []).find((f) => f.kind === "stock"); fresh(st?.modified ? `Stock ${fdate(st.modified.slice(0, 10), true)}` : "", a.generatedAt); }
         $("#scope").textContent = a ? `${avDays()} day${avDays() === 1 ? "" : "s"} of cover. ${int(inView().length)} of ${int(baseList().length)} outlets in view.` : "";
         return;
       }
       if (CW_PAGES.has(S.page)) {
         const c = S.cw;
-        if (c) $("#fresh").textContent = "Data updated " + new Date(c.generatedAt).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Dhaka" }).replace("Sept", "Sep");
+        if (c) fresh(c.dateRange?.max ? `Data to ${fdate(c.dateRange.max, true)}` : "", c.generatedAt);
         $("#scope").textContent = c ? `${fdate(S.cwv.from)} to ${fdate(S.cwv.to)}. ${int(inView().length)} of ${int(baseList().length)} outlets in view.` : "";
         return;
       }
@@ -364,7 +369,7 @@
     return kpi({
       hero: true, label: r.closed ? "Sales achievement, full month" : `Sales achievement, till ${fdate(r.date)}`, value: pct(a.ach),
       sub: `${chip(b)}<span>${bdt(a.a)} of ${bdt(a.t)} target</span>`,
-      foot: `<div class="bar" style="flex:1 1 100%;margin:2px 0 6px" role="img" aria-label="Achievement ${pct(a.ach)}"><i style="width:${fill}%;background:var(--${b.cls})"></i></div>${pace}`,
+      foot: `<div class="bar" style="flex:1 1 100%;margin:2px 0 6px" role="img" aria-label="Achievement ${pct(a.ach)}"><i style="width:${fill}%;background:var(--${b.cls})"></i></div>${pace}${a.nNo ? `<span title="Not counted in achievement">+${bdt(a.aNo)} from ${int(a.nNo)} outlet${a.nNo === 1 ? "" : "s"} without a target</span>` : ""}`,
     });
   }
   function bandsPanel(list) {
@@ -389,9 +394,9 @@
     const cols = [
       { k: "name", label: LEVELS.find((l) => l[0] === level)[1], fmt: (x) => `<span class="cell-primary">${esc(x.name)}</span><span class="cell-secondary">${esc(x.sub)}</span>`, csv: (x) => x.name },
       { k: "t", label: "Target", num: 1, fmt: (x) => bdt(x.t), csv: (x) => Math.round(x.t) },
-      { k: "a", label: "Achieved", num: 1, fmt: (x) => bdt(x.a), csv: (x) => Math.round(x.a) },
+      { k: "a", label: "Achieved", num: 1, val: (x) => (x.o && !(x.t > 0) ? x.aAll : x.a), fmt: (x) => (x.o && !(x.t > 0) ? `${bdt(x.aAll)}<span class="cell-secondary">no target</span>` : `${bdt(x.a)}${x.nNo ? `<span class="cell-secondary" title="Not counted in achievement">+${bdt(x.aNo)} no target</span>` : ""}`), csv: (x) => Math.round(x.o && !(x.t > 0) ? x.aAll : x.a) },
       { k: "ach", label: "Achievement", num: 1, fmt: (x) => `<strong>${pct(x.ach)}</strong> ${chip(band(x.ach))}`, csv: (x) => (isNum(x.ach) ? (x.ach * 100).toFixed(2) : "") },
-      { k: "gap", label: "Gap to target", num: 1, val: (x) => x.a - x.t, fmt: (x) => `<span class="${x.a - x.t < 0 ? "down" : "up"}">${bdt(x.a - x.t)}</span>`, csv: (x) => Math.round(x.a - x.t) },
+      { k: "gap", label: "Gap to target", num: 1, val: (x) => (x.t > 0 ? x.a - x.t : null), fmt: (x) => (x.t > 0 ? `<span class="${x.a - x.t < 0 ? "down" : "up"}">${bdt(x.a - x.t)}</span>` : "—"), csv: (x) => (x.t > 0 ? Math.round(x.a - x.t) : "") },
     ];
     if (!r.closed) cols.push(
       { k: "perDay", label: "Now per day", num: 1, fmt: (x) => bdt(x.perDay), csv: (x) => Math.round(x.perDay) },
@@ -489,7 +494,7 @@
       },
     });
     const k = r.closed
-      ? [kpi({ label: "Target", value: bdt(a.t), foot: `<span>${int(a.tn)} outlets with a target</span>` }), kpi({ label: "Achieved", value: bdt(a.a), foot: `<span>${exact(a.a)}</span>` }), kpi({ label: "Gap to target", value: bdt(a.a - a.t), foot: `<span>${a.a >= a.t ? "Above target" : "Below target"}</span>`, accent: `var(--${a.a >= a.t ? "good" : "bad"})` }), kpi({ label: "Average per day", value: bdt(a.a / r.dim), foot: `<span>${r.dim} trading days</span>` })]
+      ? [kpi({ label: "Target", value: bdt(a.t), foot: `<span>${int(a.tn)} outlets with a target</span>` }), kpi({ label: "Achieved", value: bdt(a.a), foot: `<span>${exact(a.a)}</span>${a.nNo ? `<span>+${bdt(a.aNo)} without a target</span>` : ""}` }), kpi({ label: "Gap to target", value: bdt(a.a - a.t), foot: `<span>${a.a >= a.t ? "Above target" : "Below target"}</span>`, accent: `var(--${a.a >= a.t ? "good" : "bad"})` }), kpi({ label: "Average per day", value: bdt(a.a / r.dim), foot: `<span>${r.dim} trading days</span>` })]
       : [kpi({ label: "Projected month-end sales", value: bdt(a.projected), sub: "At the current daily pace", foot: `<span>Estimated month target ${bdt(a.monthTarget)}</span>` }),
          kpi({ label: "Needed per day", value: bdt(a.needPerDay), sub: `For the remaining ${r.dim - r.day} days`, foot: `<span>Now ${bdt(a.perDay)}/day</span>`, accent: `var(--${a.needPerDay > a.perDay ? "bad" : "good"})` }),
          kpi({ label: "Gap to till-date target", value: bdt(a.a - a.t), foot: `<span>${int(a.tn)} outlets with a target</span>`, accent: `var(--${a.a >= a.t ? "good" : "bad"})` }),
@@ -802,10 +807,10 @@
   const KSHORT = [[/^sales \(in cr\)/i, "Sales"], [/^profit/i, "Profit"], [/sales growth/i, "SSG"], [/^expansion/i, "Expansion"], [/pakhaqs/i, "PAKHAQS"], [/store assess/i, "Store ass."],
     [/quality audit/i, "QA"], [/churn react/i, "Reactiv."], [/^churn/i, "Churn"], [/skill gap/i, "Skill gap"], [/consumable/i, "Consum."], [/stock loss/i, "Stock loss"], [/wastage/i, "Wastage"], [/salary/i, "Salary"]];
   const kShort = (m) => (KSHORT.find(([r]) => r.test(m)) || [0, m])[1];
-  const KBANDS = ["91%-100%", "81%-90%", "71%-80%", "61%-70%", "Below 60%"], KBANDS_S = ["91–100", "81–90", "71–80", "61–70", "Below 60"];
+  const KBANDS = ["91%-100%", "81%-90%", "71%-80%", "61%-70%", "60% or below"], KBANDS_S = ["91–100", "81–90", "71–80", "61–70", "60 or below"];
   const KBAND_CLS = ["b1", "b2", "b3", "b4", "b5"], KTXT = ["k-t1", "k-t2", "k-t3", "k-t4", "k-t5"];
   const kBand = (v) => (v >= 0.905 ? 0 : v >= 0.805 ? 1 : v >= 0.705 ? 2 : v >= 0.605 ? 3 : 4);
-  const kCell = (v) => (!isNum(v) ? "" : v >= 0.9 ? "kc-g" : v >= 0.7 ? "kc-a" : "kc-r");
+  const kCell = (v) => (!isNum(v) ? "" : v >= 0.905 ? "kc-g" : v >= 0.705 ? "kc-a" : "kc-r");
   const kLost = (h) => h.metrics.map((m) => ({ ...m, lost: m.w - m.pts })).sort((a, b) => b.lost - a.lost);
   // Average head: mean achievement on each KPI across the listed heads. The reference in the all-zonals view.
   function kpiAvg(heads, metrics, name) {
@@ -897,7 +902,7 @@
     NCSV.kmatrix = () => [`kpi_matrix_${S.kl}_${V.P.k}`, [rho ? "RHO" : "Zonal", "Rank", "Score %", ...ms.flatMap((m) => [`${m.metric} actual${unit(m) ? ` (${unit(m)})` : ""}`, `${m.metric} target${unit(m) ? ` (${unit(m)})` : ""}`, `${m.metric} achievement %`])],
       V.heads.map((h) => [h.head, h.rank, pcsv(h.score), ...ms.flatMap((m) => { const c = cell(h, m); return [raw(m, c?.a), raw(m, c?.t), pcsv(c?.ach)]; })]), V.P.k];
     const refRow = V.ref ? `<tr class="k-ref"><td>${esc(V.refName)}${V.ref.avg ? ' <small class="cell-secondary">average</small>' : ""}</td><td></td><td class="num"><strong>${pct(V.ref.score, 1)}</strong></td>${ms.map((m) => td(cell(V.ref, m), m)).join("")}</tr>` : "";
-    return `<section class="panel k-mat"><div class="panel-head"><div><h2>KPI heat-matrix, ${esc(V.P.label)}${S.krho ? ` · ${esc(S.krho)}` : ""}</h2><p>Achieved number on every KPI, coloured by achievement against each head's own target: green 90%+, amber 70–89%, red under 70%. Hover a cell for its target. ${rho ? "Click a row for that RHO's zonals, " : ""}click a name for the KPI breakdown, or a KPI heading to rank everyone on it.</p></div><div class="panel-tools">${kBackBtns()}${csvBtn("kmatrix")}</div></div>
+    return `<section class="panel k-mat"><div class="panel-head"><div><h2>KPI heat-matrix, ${esc(V.P.label)}${S.krho ? ` · ${esc(S.krho)}` : ""}</h2><p>Achieved number on every KPI, coloured by achievement against each head's own target: green 91%+, amber 71–90%, red 70% or below. Hover a cell for its target. ${rho ? "Click a row for that RHO's zonals, " : ""}click a name for the KPI breakdown, or a KPI heading to rank everyone on it.</p></div><div class="panel-tools">${kBackBtns()}${csvBtn("kmatrix")}</div></div>
       <div class="table-wrap" style="max-height:640px"><table><thead><tr><th>${rho ? "RHO" : "Zonal"}</th><th class="num">Rank</th><th class="num">Score</th>${ms.map((m) => `<th class="k-mh" data-kmetric="${esc(m.metric)}" tabindex="0" title="${esc(m.metric)} · weight ${int(m.w)}${m.dir.startsWith("lower") ? " · lower is better" : ""}">${esc(kShort(m.metric))}<small>${unit(m) === "Cr" ? "Cr · " : ""}w${int(m.w)}</small></th>`).join("")}</tr></thead><tbody>
       ${refRow}${V.heads.map((h) => `<tr${rho ? ` data-kdrill="${esc(h.head)}" tabindex="0" class="k-click"` : ""}><td><span class="k-name" data-khead="${esc(h.head)}" tabindex="0" role="button">${esc(h.head)}</span>${rho ? "" : `<small class="cell-secondary">RHO ${esc(V.zr[h.head] || "—")}</small>`}</td><td class="num">${int(h.rank)} ${kMove(prev, h)}</td><td class="num"><strong>${pct(h.score, 1)}</strong></td>${ms.map((m) => td(cell(h, m), m)).join("")}</tr>`).join("")}
       </tbody></table></div></section>`;
@@ -1155,11 +1160,11 @@
     return { rent, sal, inv, opx: (o.ox || 0) - rent - sal - inv };
   }
   const lossPeerCache = {};
-  function lossPeers(fmt) {
-    const key = S.pm + "|" + S.pbasis + "|" + fmt;
+  function lossPeers(fmt, own) {
+    const key = S.pm + "|" + S.pbasis + "|" + fmt + "|" + own;
     if (lossPeerCache[key]) return lossPeerCache[key];
     const after = S.pbasis === "after";
-    const every = pnlList().filter((o) => o.s >= 1 && (!fmt || o.dim.fmt === fmt)), list = every.filter((o) => (after ? o.p : o.g) >= 0);
+    const every = pnlList().filter((o) => o.s >= 1 && (!fmt || o.dim.fmt === fmt) && (!own || o.dim.own === own)), list = every.filter((o) => (after ? o.p : o.g) >= 0);
     const r = (f) => lmed(list.map((o) => { const v = f(o); return isNum(v) ? v / o.s : null; }));
     const parts = list.map((o) => [o, lossParts(o)]).filter(([, x]) => x), pr = (k) => lmed(parts.map(([o, x]) => x[k] / o.s));
     return (lossPeerCache[key] = { n: list.length, gp: r((o) => o.gp), oi: r((o) => o.oi), ox: r((o) => o.ox), fin: r((o) => o.ofc || 0), rent: pr("rent"), sal: pr("sal"), inv: pr("inv"), opx: pr("opx"),
@@ -1167,7 +1172,11 @@
       spsf: lmed(every.map((o) => (o.sft > 0 ? o.s / o.sft : null))), sales: lmed(every.map((o) => o.s)) });
   }
   function lossReason(o) {
-    const fmt = o.dim.fmt !== "Not in outlet master" ? o.dim.fmt : null, pe = lossPeers(fmt), x = lossParts(o), s = o.s;
+    const fmt = o.dim.fmt !== "Not in outlet master" ? o.dim.fmt : null, own = o.dim.own === "Own" || o.dim.own === "Franchise" ? o.dim.own : null;
+    // Same format and ownership when there are enough profitable peers, otherwise the whole format.
+    let pe = lossPeers(fmt, own), peerOwn = own;
+    if (pe.n < 5) { pe = lossPeers(fmt, null); peerOwn = null; }
+    const x = lossParts(o), s = o.s;
     const fin = S.pbasis === "after" ? o.ofc || 0 : 0, finPeer = fin ? pe.fin || 0 : 0;
     const exp = o.sft > 0 && isNum(pe.spsf) ? pe.spsf * o.sft : pe.sales || s;
     const base = Math.max(s, exp);
@@ -1180,7 +1189,7 @@
       g["Outlet OPEX"] = x.opx + fin - ((pe.opx || 0) + finPeer) * base;
     } else g["Outlet OPEX"] = (o.ox || 0) + fin - ((pe.ox || 0) + finPeer) * base;
     const top = Object.entries(g).sort((a, b) => b[1] - a[1])[0];
-    return { reason: top[0], gap: top[1], gaps: g, exp, split: !!x, peers: pe.n, fmt };
+    return { reason: top[0], gap: top[1], gaps: g, exp, split: !!x, peers: pe.n, fmt: [peerOwn, fmt].filter(Boolean).join(" ") || null };
   }
   // Drawer list of outlets from the loss page, with a CSV of exactly what is shown.
   function openLossRows(title, rows, stats, file) {
@@ -1262,7 +1271,7 @@
     const rlRows = [...byRl.values()].sort((a, b) => b.n - a.n || a.loss - b.loss);
     const lnk = (v, reason, rl, cls = "") => (v ? `<button type="button" class="age-drill-link ${cls}" data-lreason="${esc(reason)}" data-lrl="${esc(rl)}" title="${esc(`${reason || "All loss-making outlets"}${rl ? `, ${rl}` : ""}`)}">${v}</button>` : '<span class="muted">0</span>');
     const noSplit = losses.length && !losses[0].why.split;
-    const method = `Each loss-making outlet is compared with the median profitable outlet of its format; its primary reason is the line with the biggest taka gap. Low sales are judged on sales per square foot against a typical outlet of the same format.${noSplit ? " This period has no cost-line breakdown, so Inventory gap, Salary and Rent fall under Outlet OPEX." : ""}`;
+    const method = `Each loss-making outlet is compared with the median profitable outlet of the same format and ownership; its primary reason is the line with the biggest taka gap. Low sales are judged on sales per square foot against a typical outlet of the same format.${noSplit ? " This period has no cost-line breakdown, so Inventory gap, Salary and Rent fall under Outlet OPEX." : ""}`;
     NCSV.lreason = () => [`loss_primary_reason_${S.pm}_${S.pbasis}`, ["Regional leader", "Loss outlets", "Loss (Tk)", ...LREASONS], rlRows.map((r) => [r.k, r.n, Math.round(r.loss), ...LREASONS.map((t) => r.c[t])]).concat([["Total", losses.length, Math.round(totLoss), ...LREASONS.map((t) => byR[t].n)]]), S.pm];
     const leadPanel = `<section class="panel lr-lead"><div class="panel-head"><div><h2 class="hint-title" tabindex="0">Primary reason of loss by regional leader, ${esc(periodName)} <span class="hint-i" aria-hidden="true">ⓘ</span></h2><p class="hint-text">${method} Click a number for the outlets.</p></div><div class="panel-tools">${csvBtn("lreason")}</div></div>
       <div class="table-wrap" style="max-height:none"><table class="lr-table"><thead><tr><th>Regional leader</th><th class="num">Loss outlets</th><th class="num">Loss (Tk)</th>${LREASONS.map((t) => `<th class="num">${esc(t)}</th>`).join("")}</tr></thead><tbody>
@@ -3125,7 +3134,8 @@
         ${avSel("cat3", [["", "All CAT3"], ...cats.map((x) => [x, x])], "CAT3")}${extra}<button class="btn" data-uitoggle="avBarOpen" aria-expanded="true">Hide</button></div></div>${stale ? `<div class="panel-body">${stale}</div>` : ""}</section>`;
   }
   const avPct = (a) => (a && a.slots ? pct(avRate(a), 2) : "—");
-  const avBand = (r) => (!isNum(r) ? { cls: "idle", label: "No items" } : r >= 0.95 ? { cls: "good", label: "95% or more" } : r >= 0.85 ? { cls: "warn", label: "85 to 95%" } : { cls: "bad", label: "Below 85%" });
+  // Status chips use the same five bands as the criteria cards (AV_BANDS).
+  const avBand = (r) => (!isNum(r) ? { cls: "idle", label: "No items" } : { cls: ["good", "info", "warn", "bad", "crit"][avBandIdx(r)], label: AV_BANDS[avBandIdx(r)] });
   function avCard(label, a, accent, sub) {
     const r = avRate(a);
     return kpi({ label, value: avPct(a), accent, sub: `${chip(avBand(r))}<span>${int(a.ok)} of ${int(a.slots)} available</span>`, foot: sub || `<span>Out of stock ${int(a.st[2])}</span><span>Below cover ${int(a.st[1])}</span>` });
@@ -3196,7 +3206,7 @@
 
   // RHO wise overall availability: per regional leader, the average of their outlets' own availability
   // for Core, Promo, KVI and all three together, and how many outlets fall in each band.
-  const AV_BANDS = ["91%-100%", "81%-90%", "71%-80%", "61%-70%", "Below 60%"];
+  const AV_BANDS = ["91%-100%", "81%-90%", "71%-80%", "61%-70%", "60% or below"];
   const AV_BAND_CLS = ["b1", "b2", "b3", "b4", "b5"];
   // Availability criteria card: name, subtitle, average outlet availability, a bar split into the bands and the
   // band counts. head / band(i) return the click attributes for the title and for each band.
@@ -3563,7 +3573,7 @@
     const fact = (l, v) => (v ? `<dt>${l}</dt><dd>${v}</dd>` : "");
     $("#drawerBody").innerHTML = `
       <div class="stat-grid">
-        ${stat("Achievement", pct(a.ach), `${chip(band(a.ach))} ${bdt(a.a)} of ${bdt(a.t)}`)}
+        ${stat("Achievement", pct(a.ach), a.t > 0 ? `${chip(band(a.ach))} ${bdt(a.a)} of ${bdt(a.t)}` : `No target · achieved ${bdt(a.aAll)}`)}
         ${stat("Sales", bdt(a.s), `${delta(a.gy)} vs last year`)}
         ${stat("Sales vs last month", delta(a.gm), `last month ${bdt(a.sm)}`)}
         ${stat("Footfall", int(a.f), `${delta(growth(a.f, a.fy))} vs last year`)}

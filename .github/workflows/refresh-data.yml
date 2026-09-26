@@ -6,7 +6,8 @@ on:
   workflow_dispatch:          # "Run workflow" button for an instant refresh
 
 permissions:
-  contents: write
+  contents: write   # commit the refreshed data files
+  actions: write    # start the deploy workflow when the data changed
 
 concurrency:
   group: refresh-data
@@ -15,9 +16,11 @@ concurrency:
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     env:
-      DRIVE_CACHE: ${{ runner.temp }}/drive-cache   # one download of each Drive file per run
+      # One download of each Drive file, shared by the four builds and kept between runs.
+      # Files are keyed by Drive id + last-modified, so only new or changed files are downloaded.
+      DRIVE_CACHE: /tmp/drive-cache
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -26,6 +29,14 @@ jobs:
           cache: pip
           cache-dependency-path: scripts/requirements.txt
       - run: pip install -r scripts/requirements.txt
+      - name: Restore the Drive download cache
+        uses: actions/cache/restore@v4
+        with:
+          path: /tmp/drive-cache
+          key: drive-cache-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: drive-cache-
+      - name: Mark the start of this run
+        run: mkdir -p /tmp/drive-cache && touch /tmp/run-start && sleep 1
       - name: Download Drive files and build data.json
         run: python scripts/build_data.py
       - name: Download outlet network files and build network.json
@@ -38,11 +49,30 @@ jobs:
       - name: Download availability files and build av.json
         continue-on-error: true
         run: python scripts/av/refresh.py
+      - name: Drop cached files this run did not use
+        if: always()
+        run: find /tmp/drive-cache -type f ! -newer /tmp/run-start -delete; du -sh /tmp/drive-cache || true
+      - name: Save the Drive download cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: /tmp/drive-cache
+          key: drive-cache-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Publish if the data changed
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           if git diff --quiet -- data/data.json data/network.json data/cw.json data/av.json; then echo "No data changes."; exit 0; fi
           git config user.name "ops-dashboard-bot"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add data/data.json data/network.json data/network-sync.json data/cw.json data/av.json
           git commit -m "Refresh data $(date -u +'%Y-%m-%d %H:%M') UTC"
-          git push
+          # Someone may have pushed code while this run was busy: replay the data commit on top and retry.
+          pushed=0
+          for attempt in 1 2 3; do
+            if git pull --rebase --autostash origin main && git push; then pushed=1; break; fi
+            echo "Push attempt $attempt failed; retrying."; sleep $((attempt * 10))
+          done
+          if [ "$pushed" != 1 ]; then echo "::error::Could not push the refreshed data."; exit 1; fi
+          # Pushes made with the workflow token do not start other workflows, so start the deploy here.
+          gh workflow run deploy-pages.yml --ref main
