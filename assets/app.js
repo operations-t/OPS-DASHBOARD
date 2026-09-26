@@ -205,7 +205,7 @@
       ${rows.length > size ? `<div class="pager"><span>Showing ${int((t.page - 1) * size + 1)}–${int(Math.min(t.page * size, rows.length))} of ${int(rows.length)}</span><div><button class="btn" data-pg="-1" ${t.page === 1 ? "disabled" : ""}>Previous</button><span>Page ${t.page} of ${pages}</span><button class="btn" data-pg="1" ${t.page === pages ? "disabled" : ""}>Next</button></div></div>` : ""}`;
     $$("[data-sort]", el).forEach((b) => b.addEventListener("click", () => {
       const k = b.dataset.sort;
-      if (t.sort === k) t.dir = t.dir === "asc" ? "desc" : "asc"; else { t.sort = k; t.dir = "desc"; }
+      if (t.sort === k) t.dir = t.dir === "asc" ? "desc" : "asc"; else { t.sort = k; t.dir = sp.cols.find((c) => c.k === k)?.firstDir || "desc"; }
       drawTable(id);
     }));
     const inp = $("[data-tsearch]", el);
@@ -219,7 +219,7 @@
   function csv(id, rows) {
     const sp = S.tables[id].spec;
     const q = (v) => { const s = v == null ? "" : String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
-    const cols = sp.csvCols || sp.cols;
+    const cols = (sp.csvCols || sp.cols).filter((c) => !c.nocsv);
     const lines = [cols.map((c) => q(c.csvLabel || c.label)).join(",")].concat(rows.map((r) => cols.map((c) => q(c.csv ? c.csv(r) : r[c.k])).join(",")));
     const blob = new Blob(["\ufeff" + lines.join("\n")], { type: "text/csv;charset=utf-8" });
     const a = document.createElement("a");
@@ -448,7 +448,7 @@
     const league = mountTable("ov-league", {
       title: D.V.zn ? `Outlets of ${D.V.zn}` : D.V.rl ? `Zonals of ${D.V.rl}` : { rl: "Regional leaders", zn: "Zonal leaders", outlet: "Outlets" }[at], file: D.file("sales"), banner: D.crumbs, tools: D.tools,
       desc: (n) => (at === "outlet" ? `${n} outlet${n === 1 ? "" : "s"}. Click an outlet for its profile.` : at === "zn" ? `${n} zonal${n === 1 ? "" : "s"}. Achievement and growth for the outlets in view. Click a zonal to list its outlets.` : `${n} regional leaders. Achievement and growth for the outlets in view. Click a leader to see their zonals.`),
-      rows: lrows, cols: achCols(r, at), key: (x) => x.key, searchText: (x) => `${x.name} ${x.sub}`, defaultSort: "ach", pageSize: 25,
+      rows: lrows, cols: achCols(r, at), key: (x) => x.key, searchText: (x) => `${x.name} ${x.sub}`, defaultSort: "a", pageSize: 25,
       rowAttr: (x) => (x.o ? outletAttr(x) : D.pick(x)),
     });
     return `
@@ -481,7 +481,7 @@
     const table = mountTable("ach", {
       title: `Achievement by ${lvlName.toLowerCase()}`, file: `achievement_by_${S.level}`,
       desc: (n) => `${int(n)} rows. ${r.closed ? "Final month results." : "Target is prorated to the days elapsed; needed per day assumes an even daily target."}${lv === "outlet" ? " Click a row for the outlet profile." : " Click a row to list its outlets."}`,
-      rows, cols: achCols(r, lv), key: (x) => x.key, searchText: (x) => `${x.name} ${x.sub}`, defaultSort: "ach", tools, rowAttr: gpickAttr("ach", S.level), banner: gBanner("ach", ad),
+      rows, cols: achCols(r, lv), key: (x) => x.key, searchText: (x) => `${x.name} ${x.sub}`, defaultSort: "a", tools, rowAttr: gpickAttr("ach", S.level), banner: gBanner("ach", ad),
       wire: (el) => {
         $("[data-level]", el).addEventListener("change", (e) => { S.level = e.target.value; S.tables.ach.page = 1; render(); });
         $$("[data-band]", el).forEach((b) => b.addEventListener("click", () => { const k = b.dataset.band; S.bands.has(k) ? S.bands.delete(k) : S.bands.add(k); S.tables.ach.page = 1; render(); }));
@@ -1166,13 +1166,14 @@
       title: V.zn ? `Outlet P/L in ${V.zn}` : V.rl ? `Loss by zonal under ${V.rl}` : { rl: "Loss by regional leader", zn: "Loss by zonal", outlet: "P/L by outlet" }[at], file: D.file(`loss_${S.pm}`), pageSize: 25,
       banner: D.crumbs, tools: D.tools,
       desc: (n) => (at === "outlet" ? `${int(n)} outlets, P&L ${basisLbl}, biggest loss first. Click an outlet for its cost breakdown.` : `${int(n)} ${at === "zn" ? "zonals" : "regional leaders"}, P&L ${basisLbl}. Click ${at === "zn" ? "a zonal to list its outlets" : "a leader to see their zonals"}. The loss-making list below follows your selection.`),
-      rows: grpRows, key: (x) => x.key, searchText: (x) => `${x.name} ${x.sub}`, defaultSort: "loss", defaultDir: "asc",
+      rows: grpRows, key: (x) => x.key, searchText: (x) => `${x.name} ${x.sub}`, defaultSort: "l", defaultDir: "desc",
       rowAttr: (x) => (at === "outlet" ? `data-pnl="${esc(x.key)}" tabindex="0"` : D.pick(x)),
       cols: at === "outlet"
         ? [{ k: "name", label: nameLbl, fmt: (x) => `<span class="cell-primary">${esc(x.name)}</span><span class="cell-secondary">${esc(x.sub)}</span>`, csv: (x) => x.name, val: (x) => x.name },
           { k: "age", label: "Age", num: 1, fmt: (x) => ageTxt(x.age), csv: (x) => x.age ?? "" },
           { k: "s", label: "Sales", num: 1, fmt: (x) => bdt(x.s), csv: (x) => Math.round(x.s) },
           { k: "loss", label: "P/L", num: 1, fmt: (x) => `<strong class="${x.loss < 0 ? "down" : "up"}">${bdt(x.loss)}</strong>`, csv: (x) => (isNum(x.loss) ? Math.round(x.loss) : "") },
+          { k: "l", label: "Loss order", num: 1, hide: 1, nocsv: 1, val: (x) => (isNum(x.loss) ? -x.loss : null), csv: (x) => (isNum(x.loss) ? Math.round(x.loss) : "") },
           { k: "status", label: "Status", val: (x) => (x.x.loss ? "Loss-making" : "Profitable"), fmt: (x) => chip(x.x.loss ? LOSS_STATUS[x.x.st] || { cls: "bad", label: "Loss-making" } : { cls: "good", label: "Profitable" }), csv: (x) => (x.x.loss ? (LOSS_STATUS[x.x.st] || { label: "Loss-making" }).label : "Profitable") }]
         : [{ k: "name", label: nameLbl, fmt: (x) => `<span class="cell-primary">${esc(x.name)}</span><span class="cell-secondary">${esc(x.sub)}</span>`, csv: (x) => x.name, val: (x) => x.name },
           { k: "l", label: "Loss-making", num: 1, fmt: (x) => int(x.l) }, { k: "share", label: "Share", num: 1, fmt: (x) => pct(x.share), csv: (x) => pcsv(x.share) },
@@ -3003,7 +3004,7 @@
     return [first, ...(countLabel ? [{ k: "n", label: countLabel, num: 1, fmt: (x) => int(x.n) }] : []),
       { k: "slots", label: "Pairs", num: 1, fmt: (x) => int(x.slots), hide: 1 },
       { k: "ok", label: "Available", num: 1, fmt: (x) => int(x.ok) },
-      { k: "rate", label: "Availability", num: 1, val: (x) => avRate(x), fmt: (x) => `<span class="rate-pair"><strong>${avPct(x)}</strong>${chip(avBand(avRate(x)))}</span>`, csv: (x) => (isNum(avRate(x)) ? (avRate(x) * 100).toFixed(2) : "") },
+      { k: "rate", label: "Availability", num: 1, firstDir: "asc", val: (x) => avRate(x), fmt: (x) => `<span class="rate-pair"><strong>${avPct(x)}</strong>${chip(avBand(avRate(x)))}</span>`, csv: (x) => (isNum(avRate(x)) ? (avRate(x) * 100).toFixed(2) : "") },
       { k: "oos", label: "Out of stock", num: 1, val: (x) => x.st[2], fmt: (x) => int(x.st[2]), csv: (x) => x.st[2] },
       { k: "below", label: "Below cover", num: 1, val: (x) => x.st[1], fmt: (x) => int(x.st[1]), csv: (x) => x.st[1], hide: 1 },
       { k: "nsin", label: "No sales, in stock", num: 1, val: (x) => x.st[3], fmt: (x) => int(x.st[3]), csv: (x) => x.st[3], hide: 1 },
@@ -3103,7 +3104,7 @@
         AV_KINDS.forEach(([k]) => (r[k] = avRate(scans[k].byO.get(o.i) || avAcc())));
         return r;
       });
-      const pc = (k, label) => ({ k, label, num: 1, fmt: (x) => `<span class="rate-pair"><strong>${pct(x[k], 1)}</strong>${chip(avBand(x[k]))}</span>`, csv: (x) => (isNum(x[k]) ? (x[k] * 100).toFixed(2) : "") });
+      const pc = (k, label) => ({ k, label, num: 1, firstDir: "asc", fmt: (x) => `<span class="rate-pair"><strong>${pct(x[k], 1)}</strong>${chip(avBand(x[k]))}</span>`, csv: (x) => (isNum(x[k]) ? (x[k] * 100).toFixed(2) : "") });
       return mountTable("av-rho-o", { title: `${avUnassigned(gd.key)}: outlet wise availability`, file: `availability_outlets_${gd.key}`, stamp: S.av.generatedAt.slice(0, 10), banner: gBanner(id, gd),
         desc: (n) => `${int(n)} outlets, lowest overall first. Click an outlet for the items it is missing.`,
         rows, key: (x) => x.code, searchText: (x) => `${x.code} ${x.name} ${x.sub}`, defaultSort: "all", defaultDir: "asc",
