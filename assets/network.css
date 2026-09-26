@@ -168,8 +168,8 @@
 .stat-strip.net-strip strong{display:inline;font-size:17px}
 tr[data-lpick]{cursor:pointer}
 tr[data-lpick][aria-selected="true"] td{background:var(--info-soft)}
-tr[data-gpick],tr[data-ovpick]{cursor:pointer}
-tr[data-ovpick]:hover td{background:var(--surface-2)}
+tr[data-gpick],tr[data-dpick]{cursor:pointer}
+tr[data-dpick]:hover td{background:var(--surface-2)}
 tr[data-gpick][aria-selected="true"] td{background:var(--info-soft)}
 
 /* collapsible sidebar groups */

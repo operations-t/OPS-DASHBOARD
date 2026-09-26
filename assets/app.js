@@ -8,8 +8,8 @@
   // ------------------------------------------------------------------ config
   const NAV = [
     { group: "", items: [["gm", "Growth & momentum"], ["on", "Outlet network"]] },
-    { group: "Sales", items: [["overview", "Overview"], ["achievement", "Sales achievement"], ["growth", "Sales growth"], ["footfall", "Footfall and basket"], ["ranking", "Growth and degrowth"], ["loss", "Loss-making outlets"], ["category", "Category performance"]] },
-    { group: "Performance", items: [["performance", "KPI performance"]] },
+    { group: "Sales", items: [["overview", "Overview"], ["achievement", "Sales achievement"], ["growth", "Sales growth"], ["footfall", "Footfall and basket"], ["ranking", "Growth and degrowth"], ["category", "Category performance"]] },
+    { group: "Performance", items: [["performance", "KPI performance"], ["loss", "Loss-making outlets"]] },
     { group: "Availability", items: [["avs", "Summary"], ["avk", "SKU wise"], ["avc", "Core"], ["avp", "Promo"], ["avv", "KVI"], ["ave", "E-Commerce"], ["avb", "By division, zonal and outlet"]] },
     { group: "Consumable and wastage", items: [["cw", "Overview"], ["cwl", "League tables"], ["cwx", "Exceptions"], ["cwb", "Benchmarks"], ["cwm", "Materials"], ["cwo", "Outlet register"]] },
     { group: "Connected dashboards", items: [["gpva", "GPVA% Tracker"], ["cc", "Credit Card Extra Amount"], ["vc", "Visit Compliance"]] },
@@ -43,7 +43,7 @@
   const S = { data: null, page: "overview", period: "tilldate", filters: {}, openDim: null, tables: {}, level: "rl", bands: new Set(), lastFocus: null,
     cmp: "y", scope: "all", trend: "all", kp: null, kl: "rho", kv: "rank", krho: null, klh: null, kfocus: null, pm: null, pbasis: "before", pstat: "all", plevel: "rl", ageDrill: null,
     net: null, netLoading: false, netErr: null, netMode: "through", netFrom: "", netTo: "",
-    gdrill: {}, ov: { lvl: "rl", rl: null, zn: null },
+    gdrill: {}, ov: { lvl: "rl", rl: null, zn: null }, lv: { lvl: "rl", rl: null, zn: null },
     cw: null, cwLoading: false, cwErr: null, cwCrit: null,
     av: null, avLoading: false, avErr: null, avv: { days: "2", nd: "", cat3: "", type: "all", level: "rl", kviOnly: "no", glevel: "zn", elevel: "outlet" },
     cwv: { from: "", to: "", compare: false, status: "all", statusMetric: "consumableRate", basis: "daily", rankDim: "zone", rankMetric: "consumableRate", moversMetric: "consumableRate", leagueDim: "zone", leagueMetric: "consumableRate", excMetric: "all", benchMetric: "consumableRate" },
@@ -411,6 +411,25 @@
   const gpickAttr = (id, level) => (x) => (x.o ? outletAttr(x) : `data-gpick="${esc(id)}" data-glevel="${esc(level)}" data-gkey="${esc(x.key)}" tabindex="0" title="List ${esc(x.name)}'s outlets"`);
   const gBanner = (id, d) => (d ? `<div class="drill-banner">Showing the outlets of <strong>${esc(AV_PAGES.has(S.page) ? AV_LEVELS[d.level] || levelName(d.level) : levelName(d.level))}: ${esc(d.key === "Not in outlet master" ? "Unassigned" : d.key)}</strong> within the sidebar filters. <button type="button" data-gclear="${esc(id)}">Back to all ${esc(AV_PAGES.has(S.page) && d.level === "rl" ? "RHOs" : (AV_PAGES.has(S.page) ? AV_LEVELS[d.level] || levelName(d.level) : levelName(d.level)).toLowerCase() + "s")}</button></div>` : "");
 
+  // Three-level drill for leader tables: regional leader > zonal > outlet.
+  // st is the state key in S ({ lvl, rl, zn }), id the table id, list the outlets (each with .dim) used to map zonals to leaders.
+  function leaderDrill(st, id, list, hint) {
+    const V = S[st], rlOf = {};
+    list.forEach((o) => { if (o.dim.zn && !rlOf[o.dim.zn]) rlOf[o.dim.zn] = o.dim.rl; });
+    const at = V.zn ? "outlet" : V.rl ? "zn" : V.lvl;
+    const d = `data-dst="${st}" data-dtab="${id}"`;
+    const btn = (k, t) => `<button type="button" ${d} data-dlvl="${k}" aria-pressed="${!V.rl && !V.zn && V.lvl === k}">${t}</button>`;
+    return {
+      V, at, rlOf,
+      inPath: (o) => (!V.rl || o.dim.rl === V.rl) && (!V.zn || o.dim.zn === V.zn),
+      tools: `<div class="seg" role="group" aria-label="Level">${btn("rl", "Regional leaders")}${btn("zn", "Zonal leaders")}${btn("outlet", "Outlets")}</div>`,
+      crumbs: V.rl || V.zn ? `<div class="drill-banner"><button type="button" ${d} data-dgo="top">${V.lvl === "zn" ? "Zonal leaders" : "Regional leaders"}</button>${V.rl ? ` › ${V.zn ? `<button type="button" ${d} data-dgo="rl">${esc(V.rl)}</button>` : `<strong>${esc(V.rl)}</strong>`}` : ""}${V.zn ? ` › <strong>${esc(V.zn)}</strong>` : ""}<span class="muted">· ${at === "zn" ? "click a zonal for its outlets" : hint}</span></div>` : "",
+      pick: (x) => `${d} data-dpick="${at}" data-dkey="${esc(x.key)}" tabindex="0" title="${at === "rl" ? `See ${esc(x.name)}'s zonals` : `List ${esc(x.name)}'s outlets`}"`,
+      zsub: (key, sub) => (V.rl ? sub : `${rlOf[key] || "—"} · ${sub}`),
+      file: (base) => (V.zn ? `${base}_outlets_${V.zn}` : V.rl ? `${base}_zonals_${V.rl}` : `${base}_${{ rl: "regional_leaders", zn: "zonal_leaders", outlet: "outlets" }[at]}`).toLowerCase().replace(/[^a-z0-9_]+/g, "_"),
+    };
+  }
+
   function pageOverview() {
     const r = rep(), list = inView(), a = agg(list);
     if (!r) return `<p class="empty">No sales report is loaded yet. Check the Data quality page.</p>`;
@@ -423,21 +442,14 @@
     const cats = r.categories || {};
     const catRows = (cats.sply || []).map((c) => ({ ...c, m: (cats.splm || []).find((x) => x.cat === c.cat) }));
     // Leaders table: regional leaders > zonals > outlets. Clicking a row goes one level down; the level switch picks the starting level.
-    const V = S.ov, rlOf = {};
-    list.forEach((o) => { if (o.dim.zn && !rlOf[o.dim.zn]) rlOf[o.dim.zn] = o.dim.rl; });
-    const at = V.zn ? "outlet" : V.rl ? "zn" : V.lvl;
-    const inPath = list.filter((o) => (!V.rl || o.dim.rl === V.rl) && (!V.zn || o.dim.zn === V.zn));
-    let lrows = levelRows(inPath, at);
-    if (at === "zn") lrows = lrows.map((x) => ({ ...x, sub: V.rl ? x.sub : `${rlOf[x.key] || "—"} · ${x.sub}` }));
-    const lvlBtn = (k, t) => `<button type="button" data-ovlvl="${k}" aria-pressed="${!V.rl && !V.zn && V.lvl === k}">${t}</button>`;
-    const crumbs = V.rl || V.zn ? `<div class="drill-banner"><button type="button" data-ovgo="top">${V.lvl === "zn" ? "Zonal leaders" : "Regional leaders"}</button>${V.rl ? ` › ${V.zn ? `<button type="button" data-ovgo="rl">${esc(V.rl)}</button>` : `<strong>${esc(V.rl)}</strong>`}` : ""}${V.zn ? ` › <strong>${esc(V.zn)}</strong>` : ""}<span class="muted">· ${at === "zn" ? "click a zonal for its outlets" : "click an outlet for its profile"}</span></div>` : "";
-    const title = V.zn ? `Outlets of ${V.zn}` : V.rl ? `Zonals of ${V.rl}` : { rl: "Regional leaders", zn: "Zonal leaders", outlet: "Outlets" }[at];
+    const D = leaderDrill("ov", "ov-league", list, "click an outlet for its profile"), at = D.at;
+    let lrows = levelRows(list.filter(D.inPath), at);
+    if (at === "zn") lrows = lrows.map((x) => ({ ...x, sub: D.zsub(x.key, x.sub) }));
     const league = mountTable("ov-league", {
-      title, file: V.zn ? `outlets_${V.zn}` : V.rl ? `zonals_${V.rl}` : { rl: "regional_leaders", zn: "zonal_leaders", outlet: "outlets" }[at], banner: crumbs,
-      tools: `<div class="seg" role="group" aria-label="Level">${lvlBtn("rl", "Regional leaders")}${lvlBtn("zn", "Zonal leaders")}${lvlBtn("outlet", "Outlets")}</div>`,
+      title: D.V.zn ? `Outlets of ${D.V.zn}` : D.V.rl ? `Zonals of ${D.V.rl}` : { rl: "Regional leaders", zn: "Zonal leaders", outlet: "Outlets" }[at], file: D.file("sales"), banner: D.crumbs, tools: D.tools,
       desc: (n) => (at === "outlet" ? `${n} outlet${n === 1 ? "" : "s"}. Click an outlet for its profile.` : at === "zn" ? `${n} zonal${n === 1 ? "" : "s"}. Achievement and growth for the outlets in view. Click a zonal to list its outlets.` : `${n} regional leaders. Achievement and growth for the outlets in view. Click a leader to see their zonals.`),
       rows: lrows, cols: achCols(r, at), key: (x) => x.key, searchText: (x) => `${x.name} ${x.sub}`, defaultSort: "ach", pageSize: 25,
-      rowAttr: (x) => (x.o ? outletAttr(x) : `data-ovpick="${at}" data-ovkey="${esc(x.key)}" tabindex="0" title="${at === "rl" ? `See ${esc(x.name)}'s zonals` : `List ${esc(x.name)}'s outlets`}"`),
+      rowAttr: (x) => (x.o ? outletAttr(x) : D.pick(x)),
     });
     return `
       <div class="kpis ov-kpis">
@@ -578,14 +590,14 @@
       tr.onclick = go; tr.onkeydown = (e) => { if (e.key === "Enter") go(); };
     });
     $$("[data-gclear]", root).forEach((b) => (b.onclick = () => { delete S.gdrill[b.dataset.gclear]; render(); }));
-    // Overview leaders table: level switch, drill down a level, breadcrumb back.
-    const ovGo = () => { if (S.tables["ov-league"]) { S.tables["ov-league"].page = 1; S.tables["ov-league"].q = ""; } render(); requestAnimationFrame(() => $("#t-ov-league")?.scrollIntoView({ block: "start" })); };
-    $$("[data-ovlvl]", root).forEach((b) => (b.onclick = () => { S.ov = { lvl: b.dataset.ovlvl, rl: null, zn: null }; ovGo(); }));
-    $$("[data-ovpick]", root).forEach((tr) => {
-      const go = () => { if (tr.dataset.ovpick === "rl") S.ov.rl = tr.dataset.ovkey; else S.ov.zn = tr.dataset.ovkey; ovGo(); };
+    // Leader tables (leaderDrill): level switch, drill down a level, breadcrumb back.
+    const dGo = (n) => { const id = n.dataset.dtab; if (S.tables[id]) { S.tables[id].page = 1; S.tables[id].q = ""; } render(); requestAnimationFrame(() => $("#t-" + id)?.scrollIntoView({ block: "start" })); };
+    $$("[data-dlvl]", root).forEach((b) => (b.onclick = () => { S[b.dataset.dst] = { lvl: b.dataset.dlvl, rl: null, zn: null }; dGo(b); }));
+    $$("[data-dpick]", root).forEach((tr) => {
+      const go = () => { const V = S[tr.dataset.dst]; if (tr.dataset.dpick === "rl") V.rl = tr.dataset.dkey; else V.zn = tr.dataset.dkey; dGo(tr); };
       tr.onclick = go; tr.onkeydown = (e) => { if (e.key === "Enter") go(); };
     });
-    $$("[data-ovgo]", root).forEach((b) => (b.onclick = () => { if (b.dataset.ovgo === "top") { S.ov.rl = null; S.ov.zn = null; } else S.ov.zn = null; ovGo(); }));
+    $$("[data-dgo]", root).forEach((b) => (b.onclick = () => { const V = S[b.dataset.dst]; if (b.dataset.dgo === "top") { V.rl = null; V.zn = null; } else V.zn = null; dGo(b); }));
     $$("[data-uitoggle]", root).forEach((b) => (b.onclick = () => { UI[b.dataset.uitoggle] = !UI[b.dataset.uitoggle]; saveUI(); render(); }));
     wireNet(root);
     wireCw(root);
@@ -1138,33 +1150,46 @@
       ${bands.map((x) => `<tr><td class="cell-primary">${esc(x.b)}</td><td class="num">${ageDrillLink(x.b, "all", int(x.n), "View all trading outlets")}</td><td class="num">${ageDrillLink(x.b, "loss", int(x.l), "View loss-making outlets")}</td><td class="num">${ageDrillLink(x.b, "loss", pct(x.l / x.n), "View outlets behind the loss-making share")}</td><td class="num down">${ageDrillLink(x.b, "loss", bdt(x.loss), "View outlets contributing to total loss", "down")}</td></tr>`).join("")}
       </tbody></table></div></section>`;
 
-    // by level; a picked row narrows the outlet list below to that group
-    const lvls = LEVELS.filter((l) => l[0] !== "outlet");
-    const lvlName = lvls.find((l) => l[0] === S.plevel)[1];
-    const pick = S.lossPick && S.lossPick.level === S.plevel ? S.lossPick.key : null;
-    const g = new Map();
-    all.forEach((x) => { const k = x.o.dim[S.plevel]; if (!g.has(k)) g.set(k, []); g.get(k).push(x); });
-    const grpRows = [...g.entries()].map(([k, xs]) => { const l = xs.filter((x) => x.loss); return { key: k, name: k, sub: `${int(xs.length)} outlets`, n: xs.length, l: l.length, share: l.length / xs.length, loss: sum(l, "pl"), net: sum(xs, "pl"), s: xs.reduce((t, x) => t + (x.o.s || 0), 0) }; });
+    // by regional leader > zonal > outlet; the loss-making list below follows the drill
+    const D = leaderDrill("lv", "loss-grp", all.map((x) => x.o), "click an outlet for its cost breakdown"), at = D.at, V = D.V;
+    const inPath = all.filter((x) => D.inPath(x.o));
+    let grpRows;
+    if (at === "outlet") {
+      grpRows = inPath.map((x) => ({ key: x.o.c, name: x.o.nm, sub: `${x.o.c}, ${x.o.dim.zn}`, x, loss: x.pl, s: x.o.s || 0, age: x.age }));
+    } else {
+      const g = new Map();
+      inPath.forEach((x) => { const k = x.o.dim[at]; if (!g.has(k)) g.set(k, []); g.get(k).push(x); });
+      grpRows = [...g.entries()].map(([k, xs]) => { const l = xs.filter((x) => x.loss); return { key: k, name: k, sub: (() => { const t = `${int(xs.length)} outlet${xs.length === 1 ? "" : "s"}`; return at === "zn" ? D.zsub(k, t) : t; })(), n: xs.length, l: l.length, share: l.length / xs.length, loss: sum(l, "pl"), net: sum(xs, "pl"), s: xs.reduce((t, x) => t + (x.o.s || 0), 0) }; });
+    }
+    const nameLbl = { rl: "Regional leader", zn: "Zonal", outlet: "Outlet" }[at];
     const grp = mountTable("loss-grp", {
-      title: `Loss by ${lvls.find((l) => l[0] === S.plevel)[1].toLowerCase()}`, file: `loss_by_${S.plevel}_${S.pm}`, pageSize: 25,
-      desc: (n) => `${int(n)} rows, P&L ${basisLbl}. Click a row to list its loss-making outlets below.`, rows: grpRows, key: (x) => x.key, searchText: (x) => x.name, defaultSort: "loss", defaultDir: "asc",
-      rowAttr: (x) => `data-lpick="${esc(x.key)}" tabindex="0" title="List ${esc(x.name)}'s loss-making outlets"${pick === x.key ? ' aria-selected="true"' : ""}`,
-      tools: `<select class="sel" data-sel="plevel" aria-label="Group by">${lvls.map(([k, t]) => `<option value="${k}" ${S.plevel === k ? "selected" : ""}>${esc(t)}</option>`).join("")}</select>`,
-      cols: [{ k: "name", label: lvls.find((l) => l[0] === S.plevel)[1], fmt: (x) => `<span class="cell-primary">${esc(x.name)}</span><span class="cell-secondary">${esc(x.sub)}</span>`, csv: (x) => x.name, val: (x) => x.name },
-        { k: "l", label: "Loss-making", num: 1, fmt: (x) => int(x.l) }, { k: "share", label: "Share", num: 1, fmt: (x) => pct(x.share), csv: (x) => pcsv(x.share) },
-        { k: "loss", label: "Total loss", num: 1, fmt: (x) => `<span class="down">${bdt(x.loss)}</span>`, csv: (x) => Math.round(x.loss) },
-        { k: "net", label: "Net outlet P/L", num: 1, fmt: (x) => `<span class="${x.net < 0 ? "down" : "up"}">${bdt(x.net)}</span>`, csv: (x) => Math.round(x.net) },
-        { k: "s", label: "Sales", num: 1, fmt: (x) => bdt(x.s), csv: (x) => Math.round(x.s) }],
+      title: V.zn ? `Outlet P/L in ${V.zn}` : V.rl ? `Loss by zonal under ${V.rl}` : { rl: "Loss by regional leader", zn: "Loss by zonal", outlet: "P/L by outlet" }[at], file: D.file(`loss_${S.pm}`), pageSize: 25,
+      banner: D.crumbs, tools: D.tools,
+      desc: (n) => (at === "outlet" ? `${int(n)} outlets, P&L ${basisLbl}, biggest loss first. Click an outlet for its cost breakdown.` : `${int(n)} ${at === "zn" ? "zonals" : "regional leaders"}, P&L ${basisLbl}. Click ${at === "zn" ? "a zonal to list its outlets" : "a leader to see their zonals"}. The loss-making list below follows your selection.`),
+      rows: grpRows, key: (x) => x.key, searchText: (x) => `${x.name} ${x.sub}`, defaultSort: "loss", defaultDir: "asc",
+      rowAttr: (x) => (at === "outlet" ? `data-pnl="${esc(x.key)}" tabindex="0"` : D.pick(x)),
+      cols: at === "outlet"
+        ? [{ k: "name", label: nameLbl, fmt: (x) => `<span class="cell-primary">${esc(x.name)}</span><span class="cell-secondary">${esc(x.sub)}</span>`, csv: (x) => x.name, val: (x) => x.name },
+          { k: "age", label: "Age", num: 1, fmt: (x) => ageTxt(x.age), csv: (x) => x.age ?? "" },
+          { k: "s", label: "Sales", num: 1, fmt: (x) => bdt(x.s), csv: (x) => Math.round(x.s) },
+          { k: "loss", label: "P/L", num: 1, fmt: (x) => `<strong class="${x.loss < 0 ? "down" : "up"}">${bdt(x.loss)}</strong>`, csv: (x) => (isNum(x.loss) ? Math.round(x.loss) : "") },
+          { k: "status", label: "Status", val: (x) => (x.x.loss ? "Loss-making" : "Profitable"), fmt: (x) => chip(x.x.loss ? LOSS_STATUS[x.x.st] || { cls: "bad", label: "Loss-making" } : { cls: "good", label: "Profitable" }), csv: (x) => (x.x.loss ? (LOSS_STATUS[x.x.st] || { label: "Loss-making" }).label : "Profitable") }]
+        : [{ k: "name", label: nameLbl, fmt: (x) => `<span class="cell-primary">${esc(x.name)}</span><span class="cell-secondary">${esc(x.sub)}</span>`, csv: (x) => x.name, val: (x) => x.name },
+          { k: "l", label: "Loss-making", num: 1, fmt: (x) => int(x.l) }, { k: "share", label: "Share", num: 1, fmt: (x) => pct(x.share), csv: (x) => pcsv(x.share) },
+          { k: "loss", label: "Total loss", num: 1, fmt: (x) => `<span class="down">${bdt(x.loss)}</span>`, csv: (x) => Math.round(x.loss) },
+          { k: "net", label: "Net outlet P/L", num: 1, fmt: (x) => `<span class="${x.net < 0 ? "down" : "up"}">${bdt(x.net)}</span>`, csv: (x) => Math.round(x.net) },
+          { k: "s", label: "Sales", num: 1, fmt: (x) => bdt(x.s), csv: (x) => Math.round(x.s) }],
     });
 
     // outlet list
     let rows = losses.map((x) => ({ key: x.o.c, name: x.o.nm, sub: `${x.o.c}, ${x.o.dim.rl}, ${x.o.dim.zn}`, ...x, s: x.o.s }));
     if (S.pstat !== "all" && !ytd) rows = rows.filter((x) => x.st === S.pstat);
-    if (pick !== null) rows = rows.filter((x) => x.o.dim[S.plevel] === pick);
+    rows = rows.filter((x) => D.inPath(x.o));
+    const where = [V.rl, V.zn].filter(Boolean).join(" › ");
     const list = mountTable("loss", {
-      title: `Loss-making outlets, ${periodName}`, file: `loss_making_outlets_${S.pm}${pick !== null ? "_" + String(pick).toLowerCase().replace(/[^a-z0-9]+/g, "_") : ""}`,
-      banner: pick !== null ? `<div class="drill-banner">Showing <strong>${esc(lvlName)}: ${esc(pick)}</strong> within the sidebar filters. <button type="button" data-lpick-clear>Show all outlets</button></div>` : "",
-      desc: (n) => `${int(n)} outlets. "Break-even sales" is the sales needed to cover costs at the outlet's current margin. Click a row for the cost breakdown.`,
+      title: `Loss-making outlets, ${periodName}`, file: `loss_making_outlets_${S.pm}${where ? "_" + where.toLowerCase().replace(/[^a-z0-9]+/g, "_") : ""}`,
+      banner: where ? `<div class="drill-banner">Showing the loss-making outlets of <strong>${esc(where)}</strong> within the sidebar filters. <button type="button" data-dst="lv" data-dtab="loss-grp" data-dgo="top">Show all outlets</button></div>` : "",
+      desc: (n) => `${int(n)} outlet${n === 1 ? "" : "s"}. "Break-even sales" is the sales needed to cover costs at the outlet's current margin. Click a row for the cost breakdown.`,
       rows, key: (x) => x.key, searchText: (x) => `${x.name} ${x.sub}`, defaultSort: "pl", defaultDir: "asc", rowAttr: (x) => `data-pnl="${esc(x.key)}" tabindex="0"`,
       tools: ytd ? "" : seg("pstat", [["all", "All"], ["new", "New loss"], ["wide", "Widening"], ["narrow", "Narrowing"]], "Loss status"),
       cols: [nameCol("outlet"),
@@ -3467,7 +3492,7 @@
     try { localStorage.setItem("opsdash-theme", t); } catch (e) {}
     if (NET_PAGES.has(S.page)) render(); // charts resolve colour tokens when drawn
   });
-  $("#resetBtn").addEventListener("click", () => { DIMS.concat(NET_DIMS).forEach(([k]) => S.filters[k].clear()); S.bands.clear(); S.on.drill = null; S.lossPick = null; S.gdrill = {}; changed(); });
+  $("#resetBtn").addEventListener("click", () => { DIMS.concat(NET_DIMS).forEach(([k]) => S.filters[k].clear()); S.bands.clear(); S.on.drill = null; S.lossPick = null; S.gdrill = {}; S.ov = { ...S.ov, rl: null, zn: null }; S.lv = { ...S.lv, rl: null, zn: null }; changed(); });
   applyRail();
   $("#railBtn").addEventListener("click", () => { UI.railHidden = !UI.railHidden; saveUI(); applyRail(); });
   $("#menuBtn").addEventListener("click", () => { $("#rail").classList.add("open"); $("#scrim").hidden = false; });
