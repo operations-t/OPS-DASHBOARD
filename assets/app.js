@@ -41,7 +41,7 @@
   ];
 
   const S = { data: null, page: "overview", period: "tilldate", filters: {}, openDim: null, tables: {}, level: "rl", bands: new Set(), lastFocus: null,
-    cmp: "y", scope: "all", trend: "all", kp: null, kl: "rho", kv: "rank", pm: null, pbasis: "before", pstat: "all", plevel: "rl", ageDrill: null,
+    cmp: "y", scope: "all", trend: "all", kp: null, kl: "rho", kv: "rank", krho: null, pm: null, pbasis: "before", pstat: "all", plevel: "rl", ageDrill: null,
     net: null, netLoading: false, netErr: null, netMode: "through", netFrom: "", netTo: "",
     gdrill: {},
     cw: null, cwLoading: false, cwErr: null, cwCrit: null,
@@ -530,7 +530,11 @@
     $$("[data-age-band]", root).forEach((b) => (b.onclick = () => openAgeOutlets(b.dataset.ageBand, b.dataset.ageScope === "loss")));
     $$("[data-outlet]", root).forEach((tr) => { tr.onclick = () => openOutlet(tr.dataset.outlet); tr.onkeydown = (e) => { if (e.key === "Enter") openOutlet(tr.dataset.outlet); }; });
     $$("[data-pnl]", root).forEach((tr) => { tr.onclick = () => openPnl(tr.dataset.pnl); tr.onkeydown = (e) => { if (e.key === "Enter") openPnl(tr.dataset.pnl); }; });
-    $$("[data-khead]", root).forEach((tr) => { tr.onclick = () => openHead(tr.dataset.khead); tr.onkeydown = (e) => { if (e.key === "Enter") openHead(tr.dataset.khead); }; });
+    $$("[data-khead]", root).forEach((tr) => { tr.onclick = (e) => { e.stopPropagation(); openHead(tr.dataset.khead); }; tr.onkeydown = (e) => { if (e.key === "Enter") { e.stopPropagation(); openHead(tr.dataset.khead); } }; });
+    $$("[data-kmetric]", root).forEach((n) => { const go = (e) => { e.stopPropagation(); openKpiMetric(n.dataset.kmetric); }; n.onclick = go; n.onkeydown = (e) => { if (e.key === "Enter") go(e); }; });
+    $$("[data-kband]", root).forEach((n) => { const go = () => openKpiBand(Number(n.dataset.kband)); n.onclick = go; n.onkeydown = (e) => { if (e.key === "Enter") go(); }; });
+    $$("[data-kdrill]", root).forEach((n) => { const go = () => { S.kl = "zonal"; S.krho = n.dataset.kdrill; changed(); }; n.onclick = go; n.onkeydown = (e) => { if (e.key === "Enter") go(); }; });
+    $$("[data-kclear]", root).forEach((n) => (n.onclick = () => { S.krho = null; changed(); }));
     $$("[data-set]", root).forEach((b) => (b.onclick = () => { S[b.dataset.set] = b.dataset.val; changed(); }));
     $$("[data-sel]", root).forEach((sel) => (sel.onchange = () => { S[sel.dataset.sel] = sel.value; changed(); }));
     $$("[data-go]", root).forEach((b) => (b.onclick = () => (location.hash = b.dataset.go)));
@@ -743,50 +747,169 @@
     return m;
   }
   const catShort = (c) => { const l = c.toLowerCase(); return l.startsWith("business") ? "Business" : l.startsWith("satisf") ? "Customer" : l.startsWith("skill") ? "People" : l.startsWith("expense") ? "Expense" : c; };
+  // Loose name key so "Mr. Ranjan" (KPI file) matches "Mr. Ranjon" (outlet master).
+  const kname = (v) => String(v || "").toLowerCase().replace(/[^a-z]/g, "").replace(/[aeiou]/g, "");
+  const KSHORT = [[/^sales \(in cr\)/i, "Sales"], [/^profit/i, "Profit"], [/sales growth/i, "SSG"], [/^expansion/i, "Expansion"], [/pakhaqs/i, "PAKHAQS"], [/store assess/i, "Store ass."],
+    [/quality audit/i, "QA"], [/churn react/i, "Reactiv."], [/^churn/i, "Churn"], [/skill gap/i, "Skill gap"], [/consumable/i, "Consum."], [/stock loss/i, "Stock loss"], [/wastage/i, "Wastage"], [/salary/i, "Salary"]];
+  const kShort = (m) => (KSHORT.find(([r]) => r.test(m)) || [0, m])[1];
+  const KBANDS = ["91%-100%", "81%-90%", "71%-80%", "61%-70%", "Below 60%"], KBAND_CLS = ["b1", "b2", "b3", "b4", "b5"];
+  const kBand = (v) => (v >= 0.905 ? 0 : v >= 0.805 ? 1 : v >= 0.705 ? 2 : v >= 0.605 ? 3 : 4);
+  const kCell = (v) => (!isNum(v) ? "" : v >= 0.9 ? "kc-g" : v >= 0.7 ? "kc-a" : "kc-r");
+  // What the KPI page shows: level, period, heads (RHO drill applied) and the reference head (National, or the drilled RHO).
+  function kpiView() {
+    const K = S.data.kpi, periods = kpiPeriods(), P = periods.find((p) => p.k === S.kp) || periods.find((p) => p.k === "ytd");
+    const rows = K[S.kl] || [], sc = kpiScores(rows, P.months), zr = zonalRl();
+    let heads = sc.rest, ref = sc.nat, refName = "National";
+    if (S.kl === "zonal" && S.krho) {
+      heads = heads.filter((h) => kname(zr[h.head]) === kname(S.krho));
+      ref = kpiScores(K.rho || [], P.months).rest.find((h) => kname(h.head) === kname(S.krho)) || null;
+      refName = S.krho;
+    }
+    const metrics = [...new Map(rows.map((r) => [r.metric, { metric: r.metric, cat: r.cat, w: r.w, dir: r.dir }])).values()];
+    return { K, P, periods, rows, heads, ref, refName, metrics, zr };
+  }
+  // Rank in the month before, for the movement arrows (single-month periods only).
+  function kpiPrevRanks(V) {
+    const ms = V.K.months || [], i = ms.indexOf(V.P.k);
+    if (V.P.len !== 1 || i < 1) return null;
+    return Object.fromEntries(kpiScores(V.rows, [ms[i - 1]]).rest.map((h) => [h.head, h.rank]));
+  }
+  const kMove = (prev, h) => {
+    if (!prev || prev[h.head] == null) return "";
+    const d = prev[h.head] - h.rank;
+    return d > 0 ? `<span class="up k-mv" title="Up ${d} from last month">▲${d}</span>` : d < 0 ? `<span class="down k-mv" title="Down ${-d} from last month">▼${-d}</span>` : `<span class="k-mv muted">–</span>`;
+  };
+  function kpiScorecard(V, lvl) {
+    const r = V.ref, cats = [...new Set(V.metrics.map((m) => m.cat))], bands = [0, 0, 0, 0, 0];
+    V.heads.forEach((h) => bands[kBand(h.score)]++);
+    const n = V.heads.length || 1, cls = r ? KBAND_CLS[kBand(r.score)] : "";
+    return `<section class="panel"><div class="panel-head"><div><h2>${esc(V.refName)} scorecard</h2><p>Weighted score out of 100, the points each category earns against its weight, and how many ${lvl} fall in each score band. Click a band for its list.</p></div></div>
+      <div class="panel-body"><article class="av-card wide k-card">
+        <div class="av-card-main"><span class="av-card-name">${esc(V.refName)}, ${esc(V.P.label)}</span><div class="av-card-val ${cls}">${r ? (r.score * 100).toFixed(1) : "—"}</div><div class="av-card-note">score out of 100${r ? ` · ${r.metrics.length} KPIs` : ""}</div></div>
+        <div class="av-card-dist">
+          <div class="k-cats">${cats.map((c) => { const x = r?.cats[c], v = x ? x.pts / x.w : null; return `<div class="k-cat"><span>${esc(catShort(c))}</span><div class="k-track"><i class="${isNum(v) ? KBAND_CLS[kBand(v)] : ""}" style="width:${isNum(v) ? v * 100 : 0}%"></i></div><b>${x ? `${x.pts.toFixed(1)} of ${int(x.w)}` : "—"}</b></div>`; }).join("")}</div>
+          <div class="av-stack">${bands.map((v, i) => (v ? `<i class="${KBAND_CLS[i]}" style="flex-grow:${v}" title="${KBANDS[i]}: ${v}"></i>` : "")).join("")}</div>
+          <ul class="av-bands">${KBANDS.map((t, i) => `<li${bands[i] ? ` data-kband="${i}" tabindex="0" role="button" title="${lvl} scoring ${t}"` : ' class="zero"'}><i class="${KBAND_CLS[i]}"></i><span>${t}</span><b>${int(bands[i])}</b><small>${Math.round((bands[i] / n) * 100)}% of ${lvl}</small></li>`).join("")}</ul></div>
+      </article></div></section>`;
+  }
+  function kpiLost(V) {
+    const r = V.ref;
+    if (!r) return "";
+    const lost = r.metrics.map((m) => ({ ...m, lost: m.w - m.pts })).sort((a, b) => b.lost - a.lost);
+    const max = Math.max(...lost.map((m) => m.lost), 0.0001), tot = lost.reduce((a, m) => a + m.lost, 0);
+    NCSV.klost = () => [`kpi_points_lost_${V.P.k}`, ["KPI", "Category", "Weight", "Achievement %", "Points earned", "Points lost"], lost.map((m) => [m.metric, catShort(m.cat), m.w, pcsv(m.ach), m.pts.toFixed(2), m.lost.toFixed(2)]), V.P.k];
+    return `<section class="panel"><div class="panel-head"><div><h2>Where the points are lost</h2><p>${esc(V.refName)} loses ${tot.toFixed(1)} of 100 points. Each bar is a KPI's weight minus the points it earned, biggest loss first. Click a KPI to rank every head on it.</p></div><div class="panel-tools">${csvBtn("klost")}</div></div>
+      <div class="panel-body"><div class="k-lost">${lost.map((m) => `<div class="k-lrow" data-kmetric="${esc(m.metric)}" tabindex="0" role="button"><span><strong>${esc(m.metric)}</strong><small>${esc(catShort(m.cat))} · ${pct(m.ach, 1)} achieved · weight ${int(m.w)}</small></span><div class="k-track"><i class="${m.ach >= 0.9 ? "b2" : m.ach >= 0.7 ? "b3" : "b5"}" style="width:${(m.lost / max) * 100}%"></i></div><b>${m.lost < 0.005 ? "0" : "−" + m.lost.toFixed(2)}</b></div>`).join("")}</div></div></section>`;
+  }
+  function kpiMatrix(V, lvl, prev) {
+    const ms = V.metrics, rho = S.kl === "rho";
+    const cell = (h, m) => h.metrics.find((x) => x.metric === m.metric);
+    const td = (c, m) => `<td class="${kCell(c?.ach)}" title="${esc(m.metric)}: target ${kfmt(m.metric, c?.t)}, actual ${kfmt(m.metric, c?.a)}">${isNum(c?.ach) ? Math.round(c.ach * 100) : "—"}</td>`;
+    NCSV.kmatrix = () => [`kpi_matrix_${S.kl}_${V.P.k}`, [rho ? "RHO" : "Zonal", "Rank", "Score %", ...ms.map((m) => m.metric + " %")], V.heads.map((h) => [h.head, h.rank, pcsv(h.score), ...ms.map((m) => pcsv(cell(h, m)?.ach))]), V.P.k];
+    const refRow = V.ref ? `<tr class="k-ref"><td>${esc(V.refName)}</td><td></td><td class="num"><strong>${pct(V.ref.score, 1)}</strong></td>${ms.map((m) => td(cell(V.ref, m), m)).join("")}</tr>` : "";
+    return `<section class="panel k-mat"><div class="panel-head"><div><h2>KPI heat-matrix, ${esc(V.P.label)}</h2><p>Achievement % on every KPI (capped at 100). Green 90+, amber 70–89, red under 70. ${rho ? "Click a row for that RHO's zonals, " : ""}click a name for the KPI breakdown, or a KPI heading to rank everyone on it.</p></div><div class="panel-tools">${csvBtn("kmatrix")}</div></div>
+      <div class="table-wrap" style="max-height:640px"><table><thead><tr><th>${rho ? "RHO" : "Zonal"}</th><th class="num">Rank</th><th class="num">Score</th>${ms.map((m) => `<th class="k-mh" data-kmetric="${esc(m.metric)}" tabindex="0" title="${esc(m.metric)} · weight ${int(m.w)}${m.dir.startsWith("lower") ? " · lower is better" : ""}">${esc(kShort(m.metric))}<small>${int(m.w)}</small></th>`).join("")}</tr></thead><tbody>
+      ${refRow}${V.heads.map((h) => `<tr${rho ? ` data-kdrill="${esc(h.head)}" tabindex="0" class="k-click"` : ""}><td><span class="k-name" data-khead="${esc(h.head)}" tabindex="0" role="button">${esc(h.head)}</span>${rho ? "" : `<small class="cell-secondary">RHO ${esc(V.zr[h.head] || "—")}</small>`}</td><td class="num">${int(h.rank)} ${kMove(prev, h)}</td><td class="num"><strong>${pct(h.score, 1)}</strong></td>${ms.map((m) => td(cell(h, m), m)).join("")}</tr>`).join("")}
+      </tbody></table></div></section>`;
+  }
+  function kpiCards(V, lvl) {
+    const cards = V.metrics.map((m) => {
+      const got = V.heads.map((h) => ({ h, x: h.metrics.find((y) => y.metric === m.metric) })).filter((g) => g.x);
+      const hit = got.filter((g) => g.x.ach >= 0.999).length, worst = got.slice().sort((a, b) => a.x.ach - b.x.ach)[0];
+      const r = V.ref?.metrics.find((y) => y.metric === m.metric), v = r?.ach;
+      return `<article class="av-card k-kc" data-kmetric="${esc(m.metric)}" tabindex="0" role="button" title="Rank every head on ${esc(m.metric)}"><span class="av-card-name">${esc(m.metric)}</span><span class="av-card-sub">${esc(catShort(m.cat))} · weight ${int(m.w)}${m.dir.startsWith("lower") ? " · lower is better" : ""}</span>
+        <div class="av-card-val ${isNum(v) ? KBAND_CLS[kBand(v)] : ""}">${pct(v, 0)}</div><div class="av-card-note">${kfmt(m.metric, r?.a)} vs target ${kfmt(m.metric, r?.t)}</div>
+        <div class="av-card-avg"><span>${hit} of ${got.length} ${lvl} hit target</span></div>${worst && worst.x.ach < 0.999 ? `<div class="av-card-note" style="margin-top:0">Lowest: ${esc(worst.h.head)} (${pct(worst.x.ach, 0)})</div>` : ""}</article>`;
+    }).join("");
+    return `<section class="panel"><div class="panel-head"><div><h2>KPI cards</h2><p>${esc(V.refName)} achievement on each KPI, how many ${lvl} reached target, and the lowest. Click a card to rank every head on that KPI.</p></div></div>
+      <div class="panel-body"><div class="av-cards k-kcs">${cards}</div></div></section>`;
+  }
+  function kpiTrend(V) {
+    const ms = V.K.months || [];
+    if (ms.length < 2) return `<section class="panel"><div class="panel-head"><div><h2>Month on month</h2><p>Rank arrows and score trend lines appear here once a second month's KPI file is uploaded. Only ${esc(ms.map(fmonth).join(", ") || "no month")} so far.</p></div></div></section>`;
+    const per = ms.map((m) => Object.fromEntries(kpiScores(V.rows, [m]).rest.map((h) => [h.head, h])));
+    const W = 120, H = 26, spark = (vals) => { const pts = vals.map((v, i) => (isNum(v) ? `${((i / (vals.length - 1)) * W).toFixed(1)},${(H - 3 - v * (H - 6)).toFixed(1)}` : null)).filter(Boolean); return `<svg class="k-spark" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" aria-hidden="true"><polyline points="${pts.join(" ")}"/></svg>`; };
+    const rowsT = V.heads.map((h) => { const sc = per.map((p) => p[h.head]?.score), rk = per.map((p) => p[h.head]?.rank); const f = rk.find(isNum), l = rk[rk.length - 1]; return { h, sc, rk, d: isNum(f) && isNum(l) ? f - l : null }; });
+    NCSV.ktrend = () => [`kpi_trend_${S.kl}`, ["Head", ...ms.map((m) => fmonth(m) + " score %"), ...ms.map((m) => fmonth(m) + " rank")], rowsT.map((r) => [r.h.head, ...r.sc.map(pcsv), ...r.rk.map((v) => v ?? "")]), ms[ms.length - 1]];
+    return `<section class="panel"><div class="panel-head"><div><h2>Month on month</h2><p>Monthly score and rank for each head, ${esc(fmonth(ms[0]))} to ${esc(fmonth(ms[ms.length - 1]))}. The arrow is the rank change over that span.</p></div><div class="panel-tools">${csvBtn("ktrend")}</div></div>
+      <div class="table-wrap" style="max-height:560px"><table><thead><tr><th>Head</th>${ms.map((m) => `<th class="num">${esc(fmonth(m))}</th>`).join("")}<th class="num">Rank change</th><th>Trend</th></tr></thead><tbody>
+      ${rowsT.map((r) => `<tr data-khead="${esc(r.h.head)}" tabindex="0" class="k-click"><td>${esc(r.h.head)}</td>${r.sc.map((v, i) => `<td class="num">${pct(v, 1)}<span class="cell-secondary">${r.rk[i] ? "Rank " + r.rk[i] : ""}</span></td>`).join("")}<td class="num">${r.d == null ? "—" : r.d > 0 ? `<span class="up">▲${r.d}</span>` : r.d < 0 ? `<span class="down">▼${-r.d}</span>` : "–"}</td><td class="${r.d < 0 ? "k-dn" : "k-upl"}">${spark(r.sc)}</td></tr>`).join("")}
+      </tbody></table></div></section>`;
+  }
+  // Drawer: every head ranked on one KPI.
+  function openKpiMetric(metric) {
+    const V = kpiView();
+    const list = V.heads.map((h) => ({ h, x: h.metrics.find((y) => y.metric === metric) })).filter((g) => g.x).sort((a, b) => b.x.ach - a.x.ach || a.h.rank - b.h.rank);
+    const r = V.ref?.metrics.find((y) => y.metric === metric), m = V.metrics.find((y) => y.metric === metric) || {};
+    S.lastFocus = document.activeElement;
+    $("#drawerTitle").textContent = `${metric}, ${V.P.label}`;
+    $("#drawerBody").innerHTML = `<div class="stat-grid three"><div class="stat"><small>${esc(V.refName)}</small><strong>${pct(r?.ach, 1)}</strong><div style="font-size:12px">${kfmt(metric, r?.a)} vs ${kfmt(metric, r?.t)}</div></div>
+        <div class="stat"><small>Hit target</small><strong>${list.filter((g) => g.x.ach >= 0.999).length} of ${list.length}</strong></div><div class="stat"><small>Weight</small><strong>${int(m.w)}</strong><div style="font-size:12px">${m.dir?.startsWith("lower") ? "Lower is better" : "Higher is better"}</div></div></div>
+      <div class="table-wrap" style="max-height:560px"><table class="compact"><thead><tr><th>#</th><th>Head</th><th class="num">Target</th><th class="num">Actual</th><th class="num">Achievement</th><th class="num">Points</th></tr></thead><tbody>
+      ${list.map((g, i) => `<tr data-khead="${esc(g.h.head)}" tabindex="0" class="k-click"><td>${i + 1}</td><td>${esc(g.h.head)}</td><td class="num">${kfmt(metric, g.x.t)}</td><td class="num">${kfmt(metric, g.x.a)}</td><td class="num ${kCell(g.x.ach)}">${pct(g.x.ach, 1)}</td><td class="num">${g.x.pts.toFixed(2)} / ${int(g.x.w)}</td></tr>`).join("")}</tbody></table></div>`;
+    wireDyn($("#drawerBody"));
+    showDrawer();
+  }
+  function openKpiBand(band) {
+    const V = kpiView(), list = V.heads.filter((h) => kBand(h.score) === band);
+    S.lastFocus = document.activeElement;
+    $("#drawerTitle").textContent = `Scores ${KBANDS[band]}, ${V.P.label}`;
+    $("#drawerBody").innerHTML = `<div class="table-wrap" style="max-height:none"><table class="compact"><thead><tr><th>Rank</th><th>Head</th><th class="num">Score</th></tr></thead><tbody>
+      ${list.map((h) => `<tr data-khead="${esc(h.head)}" tabindex="0" class="k-click"><td>${h.rank}</td><td>${esc(h.head)}</td><td class="num"><strong>${pct(h.score, 1)}</strong></td></tr>`).join("")}</tbody></table></div>`;
+    wireDyn($("#drawerBody"));
+    showDrawer();
+  }
   function pageKPI() {
     const K = S.data.kpi, periods = kpiPeriods();
     if (!periods.length) return `<p class="empty">No KPI performance file is loaded yet. Add one to the Performance folder.</p>`;
     if (!periods.find((p) => p.k === S.kp)) S.kp = periods.filter((p) => p.len === 1).slice(-1)[0].k;
-    const P = periods.find((p) => p.k === S.kp), rows = K[S.kl] || [];
-    const { nat, rest } = kpiScores(rows, P.months);
+    if (S.kl !== "zonal" || !S.krho) S.krho = null;
+    const V = kpiView(), P = V.P, rows = V.rows, nat = V.ref, rest = V.heads;
     const cats = [...new Set(rows.map((x) => x.cat))];
     const zr = zonalRl(), lvlName = S.kl === "rho" ? "RHO" : "Zonal";
     const periodSel = `<select class="sel" data-sel="kp" aria-label="Period">${periods.map((p) => `<option value="${p.k}" ${p.k === S.kp ? "selected" : ""}>${esc(p.label)}${p.len > 1 && p.have < p.len ? ` (${p.have} of ${p.len} months)` : ""}</option>`).join("")}</select>`;
-    const tools = `${seg("kl", [["rho", "RHO"], ["zonal", "Zonal"]], "Level")}${seg("kv", [["rank", "Ranking"], ["summary", "Summary"]], "View")}${S.kv === "rank" ? periodSel : ""}`;
+    const rhoNames = [...new Set((K.rho || []).map((r) => r.head))].filter((h) => h !== "National").sort();
+    const rhoSel = S.kl === "zonal" ? `<select class="sel" data-sel="krho" aria-label="RHO">${[["", "All RHOs"], ...rhoNames.map((h) => [h, h])].map(([v, t]) => `<option value="${esc(v)}" ${(S.krho || "") === v ? "selected" : ""}>${esc(t)}</option>`).join("")}</select>` : "";
+    const tools = `${seg("kl", [["rho", "RHO"], ["zonal", "Zonal"]], "Level")}${seg("kv", [["rank", "Ranking"], ["summary", "Summary"]], "View")}${S.kv === "rank" ? periodSel : ""}${rhoSel}`;
     const partial = P.len > 1 && P.have < P.len ? `<p class="note">${esc(P.label)} is partial: ${P.have} of ${P.len} months uploaded. Scores cover the uploaded months only.</p>` : "";
     const sub = (h) => (S.kl === "zonal" ? `RHO ${zr[h.head] || "not in outlet master"}` : `${h.metrics.length} metrics`);
+    const prev = kpiPrevRanks(V);
     let table;
     if (S.kv === "rank") {
       table = mountTable("kpi-" + S.kl, {
         title: `${lvlName} ranking, ${P.label}`, file: `kpi_${S.kl}_${P.k}`, pageSize: 70,
         desc: (n) => `${n} ${lvlName === "RHO" ? "RHOs" : "zonals"}. Score = weighted achievement across all KPIs; each KPI is capped at 100%. Click a row for the KPI breakdown.`,
         rows: rest.map((h) => ({ ...h, key: h.head, name: h.head, sub: sub(h), ...Object.fromEntries(cats.map((c, i) => [`c${i}`, h.cats[c] ? h.cats[c].pts / h.cats[c].w : null])) })),
-        key: (x) => x.key, searchText: (x) => `${x.name} ${x.sub}`, defaultSort: "score", tools, rowAttr: (x) => `data-khead="${esc(x.head)}" tabindex="0"`,
-        cols: [{ k: "rank", label: "Rank", num: 1, fmt: (x) => int(x.rank), val: (x) => -x.rank },
+        key: (x) => x.key, searchText: (x) => `${x.name} ${x.sub}`, defaultSort: "score", rowAttr: (x) => `data-khead="${esc(x.head)}" tabindex="0"`,
+        cols: [{ k: "rank", label: "Rank", num: 1, fmt: (x) => `${int(x.rank)} ${kMove(prev, x)}`, csv: (x) => x.rank, val: (x) => -x.rank },
           { k: "name", label: lvlName, fmt: (x) => `<span class="cell-primary">${esc(x.name)}</span><span class="cell-secondary">${esc(x.sub)}</span>`, csv: (x) => x.name, val: (x) => x.name },
           { k: "score", label: "Score", num: 1, fmt: (x) => `<strong>${pct(x.score)}</strong>`, csv: (x) => pcsv(x.score) },
           ...cats.map((c, i) => ({ k: `c${i}`, label: catShort(c), num: 1, fmt: (x) => pct(x[`c${i}`]), csv: (x) => pcsv(x[`c${i}`]) }))],
       });
     } else {
       const cols = periods.filter((p) => p.have);
-      const byP = Object.fromEntries(cols.map((p) => [p.k, kpiScores(rows, p.months).rest]));
+      const keep = (h) => !S.krho || kname(zr[h.head]) === kname(S.krho);
+      const byP = Object.fromEntries(cols.map((p) => [p.k, kpiScores(rows, p.months).rest.filter(keep)]));
       const heads = [...new Set(Object.values(byP).flat().map((h) => h.head))];
       const data = heads.map((h) => { const x = { key: h, name: h, head: h }; cols.forEach((p) => { const f = byP[p.k].find((y) => y.head === h); x[p.k] = f?.score ?? null; x[p.k + "_r"] = f?.rank; }); x.sub = S.kl === "zonal" ? `RHO ${zr[h] || "not in outlet master"}` : ""; return x; });
       table = mountTable("kpisum-" + S.kl, {
         title: `${lvlName} summary across periods`, file: `kpi_summary_${S.kl}`, pageSize: 70,
         desc: (n) => `${n} ${lvlName === "RHO" ? "RHOs" : "zonals"}. Scores with rank underneath. Partial quarters and halves cover uploaded months only.`,
-        rows: data, key: (x) => x.key, searchText: (x) => `${x.name} ${x.sub}`, defaultSort: "ytd", tools, rowAttr: (x) => `data-khead="${esc(x.head)}" tabindex="0"`,
+        rows: data, key: (x) => x.key, searchText: (x) => `${x.name} ${x.sub}`, defaultSort: "ytd", rowAttr: (x) => `data-khead="${esc(x.head)}" tabindex="0"`,
         cols: [{ k: "name", label: lvlName, fmt: (x) => `<span class="cell-primary">${esc(x.name)}</span>${x.sub ? `<span class="cell-secondary">${esc(x.sub)}</span>` : ""}`, csv: (x) => x.name, val: (x) => x.name },
           ...cols.map((p) => ({ k: p.k, label: p.len === 12 ? "Year to date" : p.len === 1 ? p.label : p.k, num: 1, fmt: (x) => `<strong>${pct(x[p.k])}</strong><span class="cell-secondary">${x[p.k + "_r"] ? "Rank " + x[p.k + "_r"] : ""}</span>`, csv: (x) => pcsv(x[p.k]) }))],
       });
     }
-    const top = rest[0], low = rest[rest.length - 1];
-    return `<div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
-      ${kpi({ label: `National score, ${P.label}`, value: pct(nat?.score), sub: `${P.have} month${P.have === 1 ? "" : "s"} of data`, foot: `<span>${nat ? nat.metrics.length + " KPIs" : "National row not found"}</span>`, accent: "var(--info)" })}
+    const top = rest[0], low = rest[rest.length - 1], lvlP = S.kl === "rho" ? "RHOs" : "zonals";
+    const drill = S.krho ? `<div class="k-drill"><span>Zonals under <strong>${esc(S.krho)}</strong>. Ranks are network-wide.</span><button type="button" class="btn" data-kclear>Show all zonals</button></div>` : "";
+    const insights = S.kv === "rank" ? `${kpiScorecard(V, lvlP)}${kpiLost(V)}${kpiCards(V, lvlP)}${kpiMatrix(V, lvlP, prev)}${kpiTrend(V)}` : "";
+    const bar = `<div class="panel k-bar"><span class="k-bar-l">${lvlName} view · ${esc(P.label)}</span><div class="panel-tools">${tools}</div></div>`;
+    return `${bar}${drill}<div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
+      ${kpi({ label: `${S.krho ? esc(S.krho) : "National"} score, ${P.label}`, value: pct(nat?.score), sub: `${P.have} month${P.have === 1 ? "" : "s"} of data`, foot: `<span>${nat ? nat.metrics.length + " KPIs" : "National row not found"}</span>`, accent: "var(--info)" })}
       ${kpi({ label: `Top ${lvlName === "RHO" ? "RHO" : "zonal"}`, value: esc(top?.head || "—"), sub: pct(top?.score), foot: `<span>Rank 1 of ${rest.length}</span>`, accent: "var(--good)" })}
       ${kpi({ label: `Lowest ${lvlName === "RHO" ? "RHO" : "zonal"}`, value: esc(low?.head || "—"), sub: pct(low?.score), foot: `<span>Rank ${rest.length} of ${rest.length}</span>`, accent: "var(--bad)" })}
       ${kpi({ label: "Performance files", value: int(K.files.length), sub: `Months: ${K.months.map(fmonth).join(", ")}`, foot: "<span>Newest file wins for each month</span>", accent: "var(--idle)" })}
-      </div>${partial}${table}`;
+      </div>${partial}${insights}${table}`;
   }
   function kfmt(metric, v) {
     if (!isNum(v)) return "—";
